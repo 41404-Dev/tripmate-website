@@ -1,0 +1,453 @@
+
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f2">
+  <title>Tripmate — Plan less. Go more.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="?page=home"><span class="brand-mark">↗</span>tripmate<span class="brand-dot">.</span></a>
+  <nav class="desktop-nav">
+    <a data-page-link="home" href="?page=home">หน้าแรก</a>
+    <a data-page-link="planner" href="?page=planner">วางแผนทริป</a>
+    <a data-page-link="trips" href="?page=trips">ทริปของฉัน</a>
+    <a data-page-link="nearby" href="?page=nearby">ที่เที่ยวใกล้ฉัน</a>
+    <a data-page-link="reviews" href="?page=reviews">รีวิว</a>
+    <a data-page-link="guide" href="?page=guide">วิธีใช้งาน</a>
+  </nav>
+  <div class="top-actions">
+    <button class="icon-btn" id="themeToggle" type="button" aria-label="สลับธีม">☾</button>
+    <button class="btn btn-dark" id="openSignup" type="button">เข้าสู่ระบบ / สมัคร ↗</button>
+  </div>
+</header>
+
+<main id="home">
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="pulse"></span> YOUR NEXT ADVENTURE STARTS HERE</div>
+      <h1>Plan less.<br><em>Go more.</em></h1>
+      <p class="hero-sub">วางแผนทริปให้เป็นเรื่องง่าย ชวนเพื่อน คำนวณงบประมาณ และเก็บแผนการเดินทางไว้ในที่เดียว</p>
+      <div class="hero-buttons">
+        <button class="btn btn-dark" id="startPlanning" type="button">เริ่มวางแผนทริป ↗</button>
+        <a class="text-link" href="?page=guide">ดูวิธีใช้งาน ↓</a>
+      </div>
+      <div class="social-proof">
+        <div class="avatar-stack"><span>A</span><span>M</span><span>P</span><span>+</span></div>
+        <div><strong>ทุกทริปเริ่มต้นจากแผนที่ดี</strong><small>วางแผนง่าย แชร์กับเพื่อนได้สะดวก</small></div>
+      </div>
+    </div>
+    <div class="hero-art">
+      <img class="hero-photo" src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1000&q=80" alt="วิวธรรมชาติสำหรับการเดินทาง">
+      <div class="photo-tag"><span class="tag-icon">⌁</span><div><strong>Find your escape</strong><small>เริ่มต้นทริปในแบบของคุณ</small></div></div>
+      <div class="floating-note"><span class="note-icon">✦</span><div><strong>One plan, less stress</strong><small>ทุกอย่างอยู่ในที่เดียว</small></div></div>
+    </div>
+  </section>
+
+  <section class="quick-plan wrap" id="planner">
+    <div class="section-kicker">LET'S MAKE A PLAN</div>
+    <div class="section-heading">
+      <div><h2>วางแผนทริปครั้งต่อไป</h2><p>กรอกรายละเอียดแล้วดูสรุปทริปได้ทันที</p></div>
+      <div class="step-count">STEP <b id="stepNumber">01</b> / 04</div>
+    </div>
+
+    <div class="stepper">
+      <div class="step active" data-step="1"><span>01</span><div><b>จุดหมาย</b><small>Where to?</small></div></div>
+      <div class="step" data-step="2"><span>02</span><div><b>วันเดินทาง</b><small>When to go?</small></div></div>
+      <div class="step" data-step="3"><span>03</span><div><b>เพื่อนร่วมทริป</b><small>Who is coming?</small></div></div>
+      <div class="step" data-step="4"><span>04</span><div><b>งบประมาณ</b><small>What it costs?</small></div></div>
+    </div>
+
+    <div class="planner-grid">
+      <form class="planner-main" id="plannerForm">
+        <section class="form-section">
+          <label for="destination">จังหวัดปลายทาง</label>
+          <div class="input-wrap">
+            <span>⌖</span>
+            <select id="destination" required aria-label="เลือกจังหวัดปลายทาง">
+              <option value="" selected disabled>เลือกจังหวัดปลายทาง</option>
+            </select>
+            <button class="small-action" id="suggestDestination" type="button">สุ่มจังหวัด</button>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <label>วันเดินทาง</label>
+          <div class="date-grid">
+            <div><small>วันไป</small><input id="startDate" type="date" required></div>
+            <div><small>วันกลับ</small><input id="endDate" type="date" required></div>
+          </div>
+          <p class="field-hint" id="dateHint">เลือกวันไปและวันกลับ</p>
+        </section>
+
+        <section class="form-section">
+          <label for="friendEmail">ชวนเพื่อนร่วมทริป</label>
+          <div class="input-wrap">
+            <span>♧</span>
+            <input id="friendEmail" type="text" placeholder="ชื่อเพื่อนหรืออีเมล">
+            <button class="small-action" id="addFriend" type="button">+ เพิ่มเพื่อน</button>
+          </div>
+          <p class="field-hint">ติ๊กยืนยันคนที่ร่วมเดินทางเพื่อคำนวณค่าใช้จ่ายต่อคน</p>
+          <div class="friend-list" id="friendList"><div class="empty-state">ยังไม่มีเพื่อนในทริปนี้</div></div>
+        </section>
+
+        <section class="form-section">
+          <label for="budget">งบประมาณรวม (บาท)</label>
+          <div class="input-wrap"><span>฿</span><input id="budget" type="number" min="0" step="100" value="6000"></div>
+          <div class="cost-grid">
+            <label>ค่าเดินทาง (บาท)<input id="transport" type="number" min="0" value="1500"></label>
+            <label>ค่าอาหาร (บาท)<input id="food" type="number" min="0" value="1200"></label>
+            <label>ค่าที่พัก (บาท)<input id="stay" type="number" min="0" value="1000"></label>
+            <label>ค่าใช้จ่ายอื่น ๆ (บาท)<input id="other" type="number" min="0" value="200"></label>
+          </div>
+          <div class="trip-preferences">
+            <label for="transportType">รูปแบบการเดินทาง
+              <select id="transportType">
+                <option>ยังไม่แน่ใจ</option>
+                <option>รถยนต์ส่วนตัว</option>
+                <option>รถโดยสาร</option>
+                <option>รถไฟ</option>
+                <option>เครื่องบิน</option>
+                <option>เรือ</option>
+              </select>
+            </label>
+            <label for="foodType">อาหารที่ชอบ
+              <select id="foodType">
+                <option>กินได้ทุกอย่าง</option>
+                <option>อาหารไทย</option>
+                <option>มังสวิรัติ</option>
+                <option>ฮาลาล</option>
+                <option>อาหารทะเล</option>
+              </select>
+            </label>
+            <label for="stayType">ที่พักที่สนใจ
+              <select id="stayType">
+                <option>ยังไม่แน่ใจ</option>
+                <option>โรงแรม</option>
+                <option>รีสอร์ต</option>
+                <option>โฮมสเตย์</option>
+                <option>แคมป์ปิ้ง</option>
+              </select>
+            </label>
+          </div>
+          <div class="smart-budget-tool">
+            <div class="smart-budget-heading">
+              <span class="smart-budget-icon" aria-hidden="true">✦</span>
+              <div>
+                <div class="smart-budget-title"><strong>Smart Budget Trip</strong><span class="smart-premium-badge" id="smartPremiumBadge">PREMIUM</span></div>
+                <p>จัดงบและร่างแผนเที่ยวให้พอดีกับทริปของคุณ</p>
+              </div>
+            </div>
+            <div class="smart-budget-controls">
+              <label for="smartTripStyle">สไตล์การเที่ยว
+                <select id="smartTripStyle">
+                  <option value="budget">ประหยัด</option>
+                  <option value="balanced" selected>สมดุล</option>
+                  <option value="comfort">สะดวกสบาย</option>
+                </select>
+              </label>
+              <label for="smartTripPace">จังหวะการเที่ยว
+                <select id="smartTripPace">
+                  <option value="relaxed">สบาย ๆ · 2 จุด/วัน</option>
+                  <option value="balanced" selected>พอดี · 3 จุด/วัน</option>
+                  <option value="packed">เก็บให้ครบ · 4 จุด/วัน</option>
+                </select>
+              </label>
+              <button class="btn btn-green" id="generateSmartTrip" type="button">🔒 สมัคร Premium</button>
+            </div>
+            <fieldset class="smart-interest-fieldset">
+              <legend>อยากเที่ยวแนวไหน <span>เลือกได้ไม่เกิน 3 แบบ</span></legend>
+              <div class="smart-interest-options">
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="culture" checked><span>🏛️ วัฒนธรรม</span></label>
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="nature" checked><span>🌿 ธรรมชาติ</span></label>
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="food" checked><span>🍜 ของกิน</span></label>
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="cafe"><span>☕ คาเฟ่</span></label>
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="adventure"><span>🧗 กิจกรรม</span></label>
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="shopping"><span>🛍️ ตลาด/ช้อปปิ้ง</span></label>
+                <label class="smart-interest-option"><input type="checkbox" name="smartInterest" value="beach"><span>🏖️ ทะเล</span></label>
+              </div>
+            </fieldset>
+            <p class="smart-budget-note" id="smartPremiumHint">ฟีเจอร์สำหรับสมาชิก Premium · ใช้จังหวัด วันเดินทาง จำนวนคน และงบด้านบน</p>
+            <p class="smart-budget-note">ระบบสร้างแผนจากข้อมูลที่คุณกรอกและลิงก์ค้นหาสถานที่ใน Google Maps · ค่าใช้จ่ายเป็นประมาณการ ไม่ใช่ราคาเรียลไทม์</p>
+          </div>
+          <section class="smart-trip-result" id="smartTripResult" aria-live="polite" hidden></section>
+        </section>
+
+       
+
+
+
+        <div class="planner-footer">
+          <span>ข้อมูลเก็บในเบราว์เซอร์เครื่องนี้</span>
+          <button class="btn btn-dark" id="saveTrip" type="button">บันทึกทริป ↗</button>
+        </div>
+        <p id="saveMessage" class="field-hint" role="status"></p>
+      </form>
+
+      <aside class="trip-summary">
+        <div class="summary-top"><span class="summary-icon">✦</span><div class="summary-label">YOUR TRIP SUMMARY</div></div>
+        <h3 id="summaryDestination">ทริปใหม่ของคุณ</h3>
+        <p id="summaryDates">ยังไม่ได้เลือกวันเดินทาง</p>
+        <div class="summary-divider"></div>
+        <div class="summary-line"><span>งบประมาณ</span><strong id="summaryBudget">฿6,000</strong></div>
+        <div class="summary-line"><span>ค่าใช้จ่ายโดยประมาณ</span><strong id="summaryCost">฿3,900</strong></div>
+        <div class="budget-track" id="budgetTrack" role="progressbar" aria-label="สัดส่วนงบประมาณที่ใช้" aria-valuemin="0" aria-valuemax="100" aria-valuenow="65"><span id="budgetBar" style="width:65%"></span></div>
+        <div class="summary-line remaining"><span>งบคงเหลือ</span><strong id="summaryRemaining">฿2,100</strong></div>
+        <div class="per-person"><span>ค่าใช้จ่ายเฉลี่ยต่อคน</span><strong id="perPerson">฿3,900</strong><small id="peopleCount">1 คนในทริป</small></div>
+        <button class="btn btn-green full" id="copySummary" type="button">คัดลอกสรุปทริป ↗</button>
+        <p class="summary-foot">ตัวเลขเป็นการประมาณจากข้อมูลที่กรอก</p>
+      </aside>
+    </div>
+  </section>
+
+  <section class="saved-section" id="savedTrips">
+    <div class="section-kicker">YOUR TRAVEL LIST</div>
+    <div class="saved-heading">
+      <div><h2>ทริปของฉัน</h2><p>ทริปที่บันทึกไว้ในเบราว์เซอร์นี้</p></div>
+      <button class="btn btn-outline" id="goPlanner" type="button">+ สร้างทริปใหม่</button>
+    </div>
+    <div class="saved-trip-grid" id="savedTripGrid"><div class="saved-empty">ยังไม่มีทริปที่บันทึกไว้</div></div>
+  </section>
+
+  <section class="nearby-section" id="nearby">
+    <div class="wrap">
+      <div class="section-kicker">DISCOVER AROUND YOU</div>
+      <div class="nearby-heading">
+        <div>
+          <h2>มีที่เที่ยวใกล้ ๆ ตรงไหนบ้าง?</h2>
+          <p>ค้นหาสถานที่น่าสนใจรอบตัว แล้วเลือกจุดหมายสำหรับทริปต่อไป</p>
+        </div>
+        <div class="nearby-controls">
+          <button class="btn btn-outline" id="configureGoogleMaps" type="button">
+            <span aria-hidden="true">⚙</span><span id="googleMapsSettingsLabel">ตั้งค่า Google Maps</span>
+          </button>
+          <button class="btn btn-dark" id="nearbySearch" type="button">
+            <span aria-hidden="true">⌖</span><span id="nearbySearchLabel">ค้นหาจากตำแหน่งของฉัน</span>
+          </button>
+        </div>
+      </div>
+      <p class="nearby-status" id="nearbyStatus" role="status" aria-live="polite">
+        ตั้งค่า API key ก่อน แล้วกดค้นหาจากตำแหน่งของคุณ พิกัดจะถูกส่งให้ Google เพื่อค้นหาสถานที่รอบตัว
+      </p>
+      <div class="nearby-layout">
+        <div class="nearby-map-shell">
+          <div class="nearby-map-toolbar">
+            <div><span class="section-kicker">GOOGLE MAPS</span><strong id="nearbyMapHeading">แผนที่สถานที่รอบตัว</strong></div>
+            <a class="nearby-open-map" id="googleCurrentSearchLink" href="#" target="_blank" rel="noopener" hidden>เปิดใน Google Maps ↗</a>
+          </div>
+          <div class="google-map-card" id="googleMapCard">
+            <div class="google-map-brand"><span aria-hidden="true">G</span> GOOGLE MAPS</div>
+            <div class="google-map-pin" aria-hidden="true">⌖</div>
+            <h3 id="nearbyMapPromptHeading">ตั้งค่าแผนที่ Google</h3>
+            <p id="nearbyMapHint">บันทึก API key ที่จำกัดไว้สำหรับ Maps Embed API แล้วอนุญาตตำแหน่งเพื่อดูสถานที่ใกล้คุณ</p>
+            <button class="btn btn-dark" id="configureGoogleMapsFromCard" type="button">ตั้งค่า API key</button>
+          </div>
+          <iframe class="nearby-google-iframe" id="nearbyGoogleMap" title="แผนที่ Google แสดงสถานที่ใกล้ตำแหน่งของคุณ" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe>
+        </div>
+        <aside class="nearby-results-card" aria-labelledby="nearbyResultsHeading">
+          <div class="nearby-results-heading">
+            <div><span class="section-kicker">EXPLORE ON GOOGLE MAPS</span><h3 id="nearbyResultsHeading">ค้นหาตามประเภท</h3></div>
+          </div>
+          <div class="nearby-result-list" id="nearbyResultList">
+            <div class="nearby-empty">ค้นหาจากตำแหน่งก่อน แล้วเลือกหมวดหมู่เพื่อเปลี่ยนผลบนแผนที่</div>
+          </div>
+        </aside>
+      </div>
+      <div class="nearby-attribution-note">
+        ผลการค้นหาและรายละเอียดสถานที่จาก <a href="https://maps.google.com" target="_blank" rel="noopener">Google Maps</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="reviews-section" id="reviews">
+    <div class="wrap">
+      <div class="section-kicker">STORIES FROM TRAVELERS</div>
+      <div class="section-heading">
+        <div><h2>รีวิวจากนักเดินทาง</h2><p>แบ่งปันประสบการณ์และไอเดียสำหรับทริปต่อไป</p></div>
+        <button class="btn btn-dark" id="openReview" type="button">+ เขียนรีวิว</button>
+      </div>
+      <div class="review-toolbar">
+        <label class="search-box"><span>⌕</span><input id="reviewSearch" type="search" placeholder="ค้นหาสถานที่หรือข้อความรีวิว"></label>
+        <select id="reviewSort" aria-label="เรียงลำดับรีวิว">
+          <option value="newest">ใหม่ล่าสุด</option><option value="rating">คะแนนสูงสุด</option>
+        </select>
+      </div>
+      <div class="review-grid" id="reviewGrid">
+        <article class="review-card" data-default-review="true" data-place="เชียงใหม่" data-rating="5" data-time="3">
+          <div class="review-image"><img src="https://images.unsplash.com/photo-1519904981063-b0cf448d479e?auto=format&fit=crop&w=800&q=80" alt="วิวธรรมชาติ" loading="lazy"><span class="review-category">ธรรมชาติ</span></div>
+          <div class="review-content"><div class="review-meta">★★★★★ <b>5.0</b><small>ทริปกับเพื่อน</small></div><h3>เชียงใหม่ — ชาร์จพลังท่ามกลางภูเขา</h3><p>อากาศดี วิวสวย เหมาะกับทริปที่อยากพักจากความวุ่นวาย</p><div class="review-bottom"><span class="review-author"><span class="mini-avatar">M</span> May</span><span class="review-cost">฿3,500 / คน</span></div></div>
+        </article>
+        <article class="review-card" data-default-review="true" data-place="ภูเก็ต" data-rating="4.8" data-time="2">
+          <div class="review-image"><img src="https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=800&q=80" alt="ทะเลและชายหาด" loading="lazy"><span class="review-category">ทะเล</span></div>
+          <div class="review-content"><div class="review-meta">★★★★★ <b>4.8</b><small>ทริป 3 วัน 2 คืน</small></div><h3>ภูเก็ต — ทะเลสวยและอาหารอร่อย</h3><p>วางแผนเส้นทางไว้ก่อนช่วยประหยัดเวลาและเที่ยวได้ครบขึ้น</p><div class="review-bottom"><span class="review-author"><span class="mini-avatar peach">P</span> Pete</span><span class="review-cost">฿5,200 / คน</span></div></div>
+        </article>
+        <article class="review-card" data-default-review="true" data-place="เขาใหญ่" data-rating="4.7" data-time="1">
+          <div class="review-image"><img src="https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=800&q=80" alt="ป่าเขียวชอุ่ม" loading="lazy"><span class="review-category">พักผ่อน</span></div>
+          <div class="review-content"><div class="review-meta">★★★★★ <b>4.7</b><small>ทริปวันหยุด</small></div><h3>เขาใหญ่ — ขับรถเที่ยวแบบสบาย ๆ</h3><p>เหมาะกับการขับรถเที่ยว แวะจุดชมวิวและคาเฟ่ระหว่างทาง</p><div class="review-bottom"><span class="review-author"><span class="mini-avatar mint">T</span> Ton</span><span class="review-cost">฿2,800 / คน</span></div></div>
+        </article>
+      </div>
+      <div class="no-results" id="noReviews" hidden>ไม่พบรีวิวที่ตรงกับการค้นหา</div>
+    </div>
+  </section>
+
+  <section class="steps-section wrap" id="howItWorks">
+    <div class="steps-copy">
+      <div class="section-kicker">SIMPLE BY DESIGN</div>
+      <h2>ทริปที่ดี<br>เริ่มจากแผนที่ชัดเจน</h2>
+      <p>รวมข้อมูลสำคัญไว้ด้วยกัน แล้วออกไปสร้างความทรงจำได้เลย</p>
+      <button class="btn btn-green" id="startPlanningBottom" type="button">เริ่มวางแผนเลย ↗</button>
+    </div>
+    <div class="steps-list">
+      <div><span>01</span><section><b>เลือกจุดหมายและวันเดินทาง</b><p>กำหนดสถานที่และช่วงเวลาที่อยากเที่ยว</p></section><i>⌖</i></div>
+      <div><span>02</span><section><b>ชวนเพื่อนร่วมทริป</b><p>เพิ่มจำนวนคนเพื่อดูค่าใช้จ่ายเฉลี่ยต่อคน</p></section><i>♧</i></div>
+      <div><span>03</span><section><b>ตรวจสอบงบประมาณ</b><p>แยกค่าเดินทาง อาหาร ที่พัก และค่าใช้จ่ายอื่น</p></section><i>฿</i></div>
+      <div><span>04</span><section><b>บันทึกแผนการเดินทาง</b><p>กลับมาแก้ไขหรือลบทริปภายหลังได้</p></section><i>✓</i></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <a class="brand" href="?page=home"><span class="brand-mark">↗</span>tripmate<span class="brand-dot">.</span></a>
+  <span>Plan less. Go more.</span>
+  <a href="?page=planner">กลับไปวางแผน ↑</a>
+</footer>
+
+<dialog class="modal" id="signupDialog">
+  <form class="modal-card" id="signupForm">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิด">×</button>
+    <span class="brand-mark large">↗</span>
+    <h2>สมัครสมาชิก Tripmate</h2>
+    <p>สร้างบัญชีเพื่อบันทึกทริปและเปิดดูข้อมูลของคุณได้จากทุกอุปกรณ์</p>
+    <button class="btn btn-google full" id="googleSignup" type="button"><span class="google-g">G</span>สมัครหรือเข้าสู่ระบบด้วย Google</button>
+    <div class="auth-divider"><span>หรือสมัครด้วยอีเมล</span></div>
+    <label>ชื่อที่ใช้แสดง<input id="signupName" type="text" required maxlength="60" autocomplete="name"></label>
+    <label>อีเมล<input id="signupEmail" type="email" required autocomplete="email"></label>
+    <label>รหัสผ่าน<input id="signupPassword" type="password" required minlength="6" autocomplete="new-password"></label>
+    <button class="btn btn-dark full" type="submit">สมัครสมาชิก</button>
+    <span class="modal-note">มีบัญชีแล้ว? <button id="switchToLogin" type="button" class="text-link">เข้าสู่ระบบ</button></span>
+  </form>
+</dialog>
+
+<dialog class="modal" id="accountDialog" aria-labelledby="accountTitle">
+  <section class="modal-card account-card">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิด">×</button>
+    <span class="brand-mark large">☺</span>
+    <h2 id="accountTitle">บัญชี Tripmate</h2>
+    <p id="accountEmail">บัญชีของคุณ</p>
+    <div class="account-data-summary"><span>ทริปที่บันทึกไว้</span><strong id="accountTripCount">0 ทริป</strong></div>
+    <button class="btn btn-outline full" id="logoutButton" type="button">ออกจากระบบ</button>
+  </section>
+</dialog>
+
+<dialog class="modal premium-modal" id="premiumDialog" aria-labelledby="premiumTitle">
+  <section class="premium-card">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิดหน้าต่าง Premium">×</button>
+    <span class="premium-mark" aria-hidden="true">✦</span>
+    <div class="section-kicker">TRIPMATE PREMIUM</div>
+    <h2 id="premiumTitle">วางแผนเที่ยวให้คุ้มทุกบาท</h2>
+    <p class="premium-intro">ปลดล็อกเครื่องมือวางแผนที่ปรับตามสไตล์ งบ จำนวนคน และแนวเที่ยวที่คุณเลือก</p>
+    <ul class="premium-benefits">
+      <li><span>✓</span> แบ่งงบเดินทาง อาหาร ที่พัก และกิจกรรมตามรูปแบบทริป</li>
+      <li><span>✓</span> เห็นงบรายวัน งบเฉลี่ยต่อคน และเงินสำรองในหน้าเดียว</li>
+      <li><span>✓</span> เลือกแนวเที่ยวและจังหวะเที่ยว พร้อมเปิดค้นหาสถานที่ใน Google Maps</li>
+      <li><span>✓</span> บันทึกร่างแผนเป็นทริปของคุณได้ทันที</li>
+    </ul>
+    <p class="premium-payment-note" id="premiumPaymentNotice">ระบบสมัครสมาชิกและชำระเงินจริงยังไม่เชื่อมต่อ ปุ่มด้านล่างเป็นโหมดเดโมและไม่มีการเรียกเก็บเงิน</p>
+    <button class="btn btn-green full" id="premiumDemoUnlock" type="button">ทดลองปลดล็อก Premium (เดโม)</button>
+    <button class="text-link premium-demo-disable" id="disablePremiumDemo" type="button" hidden>ปิดสิทธิ์ Premium เดโม</button>
+  </section>
+</dialog>
+
+<dialog class="modal" id="googleMapsKeyDialog" aria-labelledby="googleMapsKeyTitle">
+  <form class="modal-card" id="googleMapsKeyForm">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิด">×</button>
+    <span class="brand-mark large google-key-mark" aria-hidden="true">G</span>
+    <h2 id="googleMapsKeyTitle">ตั้งค่า Google Maps</h2>
+    <p>วาง API key ที่จำกัดไว้สำหรับ Maps Embed API ระบบจะเก็บ key ไว้ในเบราว์เซอร์นี้เพื่อแสดงแผนที่</p>
+    <label>Google Maps API key
+      <input id="googleMapsApiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="วาง API key ที่นี่">
+    </label>
+    <label class="check-label"><input id="showGoogleMapsApiKey" type="checkbox"> แสดง key ระหว่างตรวจสอบ</label>
+    <small class="google-key-help">ควรจำกัด key ให้ใช้ได้เฉพาะ Maps Embed API และเว็บไซต์ที่อนุญาตใน Google Cloud</small>
+    <button class="btn btn-dark full" type="submit">บันทึก key ในเบราว์เซอร์นี้</button>
+    <button class="text-link google-key-remove" id="removeGoogleMapsKey" type="button">ลบ key ที่บันทึกไว้ออกจากเบราว์เซอร์</button>
+  </form>
+</dialog>
+
+<dialog class="modal" id="loginDialog">
+  <form class="modal-card" id="loginForm">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิด">×</button>
+    <span class="brand-mark large">↗</span>
+    <h2>เข้าสู่ระบบ</h2>
+    <p>เข้าสู่ระบบเพื่อเปิดแผนทริปที่บันทึกไว้ในบัญชีของคุณ</p>
+    <button class="btn btn-google full" id="googleLogin" type="button"><span class="google-g">G</span>เข้าสู่ระบบด้วย Google</button>
+    <div class="auth-divider"><span>หรือใช้อีเมล</span></div>
+    <label>อีเมล<input id="loginEmail" type="email" required autocomplete="email"></label>
+    <label>รหัสผ่าน<input id="loginPassword" type="password" required autocomplete="current-password"></label>
+    <button class="btn btn-dark full" type="submit">เข้าสู่ระบบ</button>
+    <span class="modal-note">ยังไม่มีบัญชี? <button id="switchToSignup" type="button" class="text-link">สมัครสมาชิก</button></span>
+  </form>
+</dialog>
+
+<dialog class="modal" id="reviewDialog">
+  <form class="modal-card" id="reviewForm">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิด">×</button>
+    <span class="brand-mark large">✎</span>
+    <h2>เขียนรีวิวทริป</h2>
+    <p>แชร์ประสบการณ์การเดินทางของคุณ</p>
+    <label>สถานที่<input id="newReviewPlace" type="text" required maxlength="100" placeholder="เช่น เชียงใหม่"></label>
+    <label>คะแนน<select id="newReviewRating"><option value="5">5 — ยอดเยี่ยม</option><option value="4">4 — ดีมาก</option><option value="3">3 — ปานกลาง</option><option value="2">2 — พอใช้</option><option value="1">1 — ควรปรับปรุง</option></select></label>
+    <label>รีวิว<textarea id="newReviewText" rows="4" required maxlength="1000" placeholder="เล่าประสบการณ์ของคุณ..."></textarea></label>
+    <label>ค่าใช้จ่ายต่อคน (บาท)<input id="newReviewCost" type="number" min="0" step="1" placeholder="เช่น 2500"></label>
+    <label class="upload-field" for="reviewPhoto">
+      <span>รูปภาพประกอบ (ไม่บังคับ)</span>
+      <input id="reviewPhoto" type="file" accept="image/*">
+      <small>เลือกภาพ JPG, PNG หรือ WEBP ขนาดไม่เกิน 10 MB รูปจะถูกย่อก่อนบันทึก</small>
+    </label>
+    <div class="review-upload-preview" id="reviewPhotoPreview" hidden>
+      <img id="reviewPhotoPreviewImage" alt="ตัวอย่างรูปภาพรีวิว">
+      <button class="text-link" id="removeReviewPhoto" type="button">ลบรูป</button>
+    </div>
+    <label class="check-label"><input id="visitedCheck" type="checkbox" required> ยืนยันว่าเป็นรีวิวจากประสบการณ์ของฉัน</label>
+    <button class="btn btn-dark full" type="submit">เผยแพร่รีวิว</button>
+  </form>
+</dialog>
+
+<dialog class="modal review-detail-modal" id="reviewDetailDialog" aria-labelledby="reviewDetailTitle">
+  <article class="review-detail-card">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิดรายละเอียดรีวิว">×</button>
+    <div id="reviewDetailContent"></div>
+  </article>
+</dialog>
+
+<dialog class="modal confirm-delete-modal" id="deleteReviewDialog" aria-labelledby="deleteReviewHeading" aria-describedby="deleteReviewMessage">
+  <section class="confirm-delete-card">
+    <button class="modal-close" type="button" data-close-dialog aria-label="ปิดหน้าต่างยืนยัน">×</button>
+    <span class="confirm-delete-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3" />
+      </svg>
+    </span>
+    <div class="confirm-delete-kicker">จัดการรีวิว</div>
+    <h2 id="deleteReviewHeading">ยืนยันการลบรีวิว?</h2>
+    <p id="deleteReviewMessage">ต้องการลบรีวิว <strong id="deleteReviewPlace"></strong> ใช่ไหม การลบนี้เรียกคืนไม่ได้</p>
+    <div class="confirm-delete-actions">
+      <button class="btn btn-outline" type="button" data-close-dialog>เก็บรีวิวไว้</button>
+      <button class="btn-delete-review" id="confirmDeleteReview" type="button">ลบรีวิว</button>
+    </div>
+  </section>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="supabase-config.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+<script src="maps-config.js" defer></script>
+<script src="script.js" defer></script>
+</body>
+</html>
