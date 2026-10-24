@@ -593,7 +593,8 @@
         const { error } = await supabaseClient.rpc("tripmate_remove_member", { p_trip_id: access.tripId, p_user_id: button.dataset.removeTripMember });
         if (error) throw error;
         $("#tripInviteLink").value = ""; $("#tripInviteLinkBox").hidden = true;
-        await refreshTripMembers(); setShareStatus("นำสมาชิกออกแล้ว ประวัติค่าใช้จ่ายยังอยู่ ลิงก์เดิมถูกปิดแล้ว");
+        await refreshSharedTripData();
+        await refreshTripMembers(); setShareStatus("นำสมาชิกออกจากทริปและตัวเลือกหารค่าใช้จ่ายแล้ว ประวัติค่าใช้จ่ายเดิมยังอยู่ ลิงก์เดิมถูกปิดแล้ว");
       } catch (error) { setShareStatus(sharingErrorMessage(error)); }
       finally { button.disabled = false; inviteBusy = false; }
     });
@@ -1578,6 +1579,9 @@
     friendsInTrip.forEach(friend => {
       if (friend && typeof friend === "object" && friend.going === false) return;
       const name = typeof friend === "string" ? friend : friend?.name;
+      // Older versions kept a removed shared member as a name-only entry. Duplicate
+      // shared names received an 8-character account suffix, so hide those stale rows.
+      if (friend && typeof friend === "object" && !friend.userId && /\s\([0-9a-f]{8}\)$/i.test(String(name || ""))) return;
       if (String(name || "").trim()) names.push(String(name).trim());
     });
 
