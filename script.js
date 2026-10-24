@@ -1235,7 +1235,12 @@
   }
 
   function getPeopleCount() {
-    return 1 + friends.filter(friend => friend.going).length;
+    const confirmedPeople = 1 + friends.filter(friend => friend.going).length;
+    const input = $("#tripPeopleInput");
+    const selectedPeople = Math.min(50, Math.max(1, Math.trunc(Number(input?.value) || 1)));
+    const people = Math.max(confirmedPeople, selectedPeople);
+    if (input && Number(input.value) !== people) input.value = String(people);
+    return people;
   }
 
   function updateSummary() {
@@ -1442,6 +1447,7 @@
         going: friend.going,
         ...(friend.userId ? { userId: friend.userId } : {})
       })),
+      peopleCount: getPeopleCount(),
       budget: costs.budget,
       transport: costs.transport,
       food: costs.food,
@@ -1502,6 +1508,7 @@
     $("#food").value = 1200;
     $("#stay").value = 1000;
     $("#other").value = 200;
+    $("#tripPeopleInput").value = 1;
 
     friends = [];
 
@@ -1547,6 +1554,8 @@
           };
         }).filter(friend => friend.name)
       : [];
+    const confirmedPeople = 1 + friends.filter(friend => friend.going).length;
+    $("#tripPeopleInput").value = Math.min(50, Math.max(confirmedPeople, Math.trunc(Number(trip.peopleCount) || confirmedPeople)));
 
     $("#saveMessage").textContent = isSavedTrip
       ? `กำลังแก้ไขทริป: ${trip.destination}`
@@ -1576,9 +1585,10 @@
       const days = durationDays(trip.startDate, trip.endDate);
 
       const friendList = Array.isArray(trip.friends) ? trip.friends : [];
-      const people = 1 + friendList.filter(friend =>
+      const confirmedPeople = 1 + friendList.filter(friend =>
         typeof friend === "string" || friend.going !== false
       ).length;
+      const people = Math.max(confirmedPeople, Math.trunc(Number(trip.peopleCount) || confirmedPeople));
       const expenses = getTripExpenses(trip);
       const actualSpend = expenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount) || 0), 0);
       const budgetPercent = Number(trip.budget) > 0
@@ -2785,13 +2795,26 @@
     [
       "#destination", "#startDate", "#endDate", "#budget",
       "#transport", "#food", "#stay", "#other",
-      "#transportType", "#foodType", "#stayType"
+      "#transportType", "#foodType", "#stayType", "#tripPeopleInput"
     ].forEach(selector => {
       const refreshPlanner = () => {
         updateSummary();
       };
       $(selector).addEventListener("input", refreshPlanner);
       $(selector).addEventListener("change", refreshPlanner);
+    });
+
+    $("#decreasePeople").addEventListener("click", () => {
+      const input = $("#tripPeopleInput");
+      const confirmedPeople = 1 + friends.filter(friend => friend.going).length;
+      input.value = String(Math.max(confirmedPeople, (Number(input.value) || 1) - 1));
+      updateSummary();
+    });
+
+    $("#increasePeople").addEventListener("click", () => {
+      const input = $("#tripPeopleInput");
+      input.value = String(Math.min(50, (Number(input.value) || 1) + 1));
+      updateSummary();
     });
 
     $("#saveTrip").addEventListener("click", saveTrip);
