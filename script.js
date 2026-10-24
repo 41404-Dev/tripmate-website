@@ -2,10 +2,20 @@
 (() => {
   "use strict";
 
+  // Keep local auth redirects on the host that is allowed in Supabase.
+  if (window.location.hostname === "127.0.0.1" && window.location.port === "5500") {
+    const localUrl = new URL(window.location.href);
+    localUrl.hostname = "localhost";
+    window.location.replace(localUrl.href);
+    return;
+  }
+
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_TITLES = {
     home: "หน้าแรก",
+    join: "คำเชิญร่วมทริป",
+    discover: "ไอเดียเที่ยว",
     planner: "วางแผนทริป",
     trips: "ทริปของฉัน",
     nearby: "ที่เที่ยวใกล้ฉัน",
@@ -44,7 +54,6 @@
     profile: "tripmate-demo-profile",
     reviewGuest: "tripmate-review-guest-id",
     googleMapsApiKey: "tripmate-google-maps-embed-api-key",
-    premiumDemo: "tripmate-premium-demo",
     legacyTripMigration: "tripmate-cloud-trip-migration",
     tripSaveNotice: "tripmate-trip-save-notice"
   };
@@ -64,9 +73,21 @@
     "สุพรรณบุรี", "สุราษฎร์ธานี", "สุรินทร์", "หนองคาย", "หนองบัวลำภู",
     "อ่างทอง", "อำนาจเจริญ", "อุดรธานี", "อุตรดิตถ์", "อุทัยธานี", "อุบลราชธานี"
   ];
+  const EXPENSE_CATEGORIES = [
+    { id: "transport", label: "เดินทาง", icon: "🚆" },
+    { id: "food", label: "อาหาร", icon: "🍜" },
+    { id: "stay", label: "ที่พัก", icon: "🛏️" },
+    { id: "activity", label: "กิจกรรม / อื่น ๆ", icon: "🎟️" }
+  ];
 
   let friends = [];
   let trips = [];
+  const tripAccess = new Map();
+  let sharingAvailable = false;
+  let activeShareTripId = null;
+  let joinPreview = null;
+  let inviteBusy = false;
+  let plannerSaving = false;
   let reviews = [];
   let editingTripId = null;
   let toastTimer;
@@ -79,8 +100,18 @@
   let cloudReviewsLoaded = false;
   let nearbyLocation = null;
   let selectedNearbyQuery = "สถานที่ท่องเที่ยว";
-  let smartPlan = null;
-  let isPremiumDemo = false;
+  let nearbyWatchId = null;
+  let nearbyTrackingActive = false;
+  let nearbyLastMapUpdate = 0;
+  let nearbyLastMappedLocation = null;
+  let activeExpenseTripId = null;
+  let pendingExpenseDeleteId = null;
+  let editingExpenseId = null;
+  let expenseSaving = false;
+  let removeEditingExpenseReceipt = false;
+  let expenseReceiptPreviewUrl = null;
+  const MAX_EXPENSE_RECEIPT_BYTES = 8 * 1024 * 1024;
+  const MAX_EXPENSE_RECEIPT_DATA_URL_LENGTH = 550_000;
 
   // ---------- Utilities ----------
 
@@ -111,6 +142,15 @@
     }).format(Number(value) || 0);
   }
 
+  function moneyExact(value) {
+    return new Intl.NumberFormat("th-TH", {
+      style: "currency",
+      currency: "THB",
+      minimumFractionDigits: Number.isInteger(Number(value)) ? 0 : 2,
+      maximumFractionDigits: 2
+    }).format(Number(value) || 0);
+  }
+
   function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>"']/g, char => ({
       "&": "&amp;",
@@ -119,6 +159,108 @@
       '"': "&quot;",
       "'": "&#39;"
     })[char]);
+  }
+
+  function safeExpenseReceiptDataUrl(value) {
+    const dataUrl = String(value || "");
+    return dataUrl.length <= MAX_EXPENSE_RECEIPT_DATA_URL_LENGTH &&
+      /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(dataUrl)
+      ? dataUrl
+      : "";
+  }
+
+  function clearExpenseReceiptPreview(clearInput = true) {
+    if (expenseReceiptPreviewUrl) URL.revokeObjectURL(expenseReceiptPreviewUrl);
+    expenseReceiptPreviewUrl = null;
+    const input = $("#expenseReceipt");
+    const preview = $("#expenseReceiptPreview");
+    const image = $("#expenseReceiptPreviewImage");
+    if (clearInput && input) input.value = "";
+    if (image) image.removeAttribute("src");
+    if (preview) preview.hidden = true;
+  }
+
+  function updateExpenseReceiptPreview(input) {
+    const file = input?.files?.[0];
+    clearExpenseReceiptPreview(false);
+    if (!file) {
+      if (editingExpenseId && !removeEditingExpenseReceipt) {
+        const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+        const expense = getTripExpenses(trip).find(item => String(item.id) === String(editingExpenseId));
+        const existing = safeExpenseReceiptDataUrl(expense?.receiptImage);
+        if (existing) {
+          $("#expenseReceiptPreviewImage").src = existing;
+          $("#expenseReceiptPreview").hidden = false;
+        }
+      }
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      input.value = "";
+      toast("กรุณาเลือกไฟล์รูปภาพสำหรับสลิป");
+      updateExpenseReceiptPreview(input);
+      return;
+    }
+    if (file.size > MAX_EXPENSE_RECEIPT_BYTES) {
+      input.value = "";
+      toast("รูปสลิปต้องมีขนาดไม่เกิน 8 MB");
+      updateExpenseReceiptPreview(input);
+      return;
+    }
+
+    expenseReceiptPreviewUrl = URL.createObjectURL(file);
+    const image = $("#expenseReceiptPreviewImage");
+    const preview = $("#expenseReceiptPreview");
+    if (image && preview) {
+      image.src = expenseReceiptPreviewUrl;
+      preview.hidden = false;
+    }
+  }
+
+  async function compressExpenseReceipt(file) {
+    if (!file) return "";
+    if (!file.type.startsWith("image/")) throw new Error("ไฟล์นี้ไม่ใช่รูปภาพ");
+    if (file.size > MAX_EXPENSE_RECEIPT_BYTES) throw new Error("รูปสลิปต้องมีขนาดไม่เกิน 8 MB");
+    if (typeof createImageBitmap !== "function") throw new Error("เบราว์เซอร์นี้อ่านรูปสลิปไม่ได้");
+
+    const bitmap = await createImageBitmap(file);
+    const maxEdge = 1200;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close?.();
+      throw new Error("เตรียมรูปสลิปไม่สำเร็จ");
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+
+    let quality = 0.72;
+    let blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(result => result ? resolve(result) : reject(new Error("บีบอัดรูปสลิปไม่สำเร็จ")), "image/jpeg", quality);
+    });
+    while (blob.size > 360 * 1024 && quality > 0.48) {
+      quality -= 0.08;
+      blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(result => result ? resolve(result) : reject(new Error("บีบอัดรูปสลิปไม่สำเร็จ")), "image/jpeg", quality);
+      });
+    }
+    if (blob.size > 390 * 1024) throw new Error("รูปสลิปมีขนาดใหญ่เกินไป กรุณาเลือกรูปที่เล็กลง");
+
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = safeExpenseReceiptDataUrl(reader.result);
+        dataUrl ? resolve(dataUrl) : reject(new Error("เตรียมรูปสลิปไม่สำเร็จ"));
+      };
+      reader.onerror = () => reject(new Error("อ่านรูปสลิปไม่สำเร็จ"));
+      reader.readAsDataURL(blob);
+    });
   }
 
   function toast(message) {
@@ -160,6 +302,7 @@
 
   function closeDialog(dialog) {
     if (!dialog) return;
+    if (dialog.id === "expenseDialog" && expenseSaving) return;
 
     if (typeof dialog.close === "function" && dialog.open) {
       dialog.close();
@@ -210,6 +353,255 @@
     return true;
   }
 
+  function isSharingSetupError(error) {
+    return ["PGRST202", "42883"].includes(String(error?.code || ""));
+  }
+
+  function sharingErrorMessage(error) {
+    if (isSharingSetupError(error)) return "ยังไม่ได้เปิดระบบเชิญเพื่อนในฐานข้อมูล กรุณารันไฟล์ supabase-trip-sharing.sql ก่อน";
+    const message = String(error?.message || "");
+    if (message.includes("INVITE_INVALID")) return "ลิงก์นี้หมดอายุหรือถูกปิดแล้ว ขอคำเชิญใหม่จากเจ้าของทริปได้เลย";
+    if (message.includes("TRIP_CONFLICT")) return "มีเพื่อนอัปเดตทริปก่อนคุณ กรุณาโหลดข้อมูลล่าสุดก่อนแก้ไขต่อ";
+    if (message.includes("EXPENSE_FORBIDDEN")) return "แก้ไขหรือลบได้เฉพาะค่าใช้จ่ายที่คุณเพิ่มเอง";
+    if (message.includes("TRIP_FORBIDDEN")) return "คุณไม่มีสิทธิ์เข้าถึงทริปนี้แล้ว กรุณารีเฟรชทริป";
+    if (message.includes("AUTH_REQUIRED")) return "กรุณาเข้าสู่ระบบก่อน";
+    return "เชื่อมต่อไม่สำเร็จ ข้อมูลที่กรอกยังอยู่ กรุณาลองอีกครั้ง";
+  }
+
+  function isSharedTrip(id) {
+    const access = tripAccess.get(String(id));
+    return Boolean(access && access.ownerId !== currentUser?.id);
+  }
+
+  function canEditTripExpense(trip, expense) {
+    return Boolean(expense) && (!isSharedTrip(trip.id) || expense.createdBy === currentUser?.id);
+  }
+
+  function mapCloudTrip(row, viewerId = currentUser?.id) {
+    const ownerId = row.user_id || viewerId;
+    const id = ownerId === viewerId ? String(row.id) : `${ownerId}:${row.id}`;
+    tripAccess.set(id, { ownerId, tripId: String(row.id), version: row.updated_at,
+      ownerName: row.owner_name || row.data?.ownerDisplayName || getDisplayName() });
+    return { ...(row.data || {}), id, updatedAt: Date.parse(row.updated_at) || Date.now() };
+  }
+
+  async function writeCloudTrip(trip) {
+    if (!requireCloudAccount()) return false;
+    const userId = currentUser.id;
+    const access = tripAccess.get(String(trip.id));
+    const storedData = { ...trip, id: access?.tripId || trip.id };
+    let result;
+    if (access && sharingAvailable) {
+      result = await supabaseClient.rpc("tripmate_update_trip", {
+        p_owner_id: access.ownerId, p_trip_id: access.tripId,
+        p_expected_version: access.version, p_data: storedData
+      });
+    } else if (access) {
+      // Preserve existing installations until the sharing migration is installed.
+      if (access.ownerId !== userId) throw new Error("TRIP_FORBIDDEN");
+      result = await supabaseClient.from("trips").update({ data: storedData, updated_at: new Date().toISOString() })
+        .eq("user_id", userId).eq("id", access.tripId).eq("updated_at", access.version)
+        .select("id,user_id,data,updated_at").maybeSingle();
+      if (!result.error && !result.data) result.error = { message: "TRIP_CONFLICT" };
+    } else {
+      result = await supabaseClient.from("trips").insert({ id: String(trip.id), user_id: userId,
+        data: { ...storedData, ownerDisplayName: getDisplayName() }, updated_at: new Date().toISOString()
+      }).select("id,user_id,data,updated_at").single();
+    }
+    if (currentUser?.id !== userId) return false;
+    if (result.error) {
+      if (String(result.error.message).includes("TRIP_CONFLICT")) {
+        $("#reloadConflictingTrip").dataset.tripId = trip.id;
+        openDialog("#tripConflictDialog");
+        return false;
+      }
+      throw new Error(sharingErrorMessage(result.error));
+    }
+    Object.assign(trip, mapCloudTrip(result.data, userId));
+    return true;
+  }
+
+  async function refreshSharedTripData() {
+    if (!requireCloudAccount()) return false;
+    const userId = currentUser.id;
+    const latest = await getCloudTrips(currentUser);
+    if (currentUser?.id !== userId) return false;
+    trips = latest;
+    renderSavedTrips();
+    updateAccountUI();
+    return true;
+  }
+
+  function setShareStatus(text) { $("#tripShareStatus").textContent = text; }
+
+  async function refreshTripMembers() {
+    const id = activeShareTripId;
+    const access = tripAccess.get(id);
+    if (!access || !currentUser) return;
+    const userId = currentUser.id;
+    const { data, error } = await supabaseClient.rpc("tripmate_trip_members", { p_owner_id: access.ownerId, p_trip_id: access.tripId });
+    if (id !== activeShareTripId || currentUser?.id !== userId) return;
+    if (error) { setShareStatus(sharingErrorMessage(error)); return; }
+    const isOwner = access.ownerId === userId;
+    $("#tripMemberList").innerHTML = (data.members || []).map(member => `<div class="share-member"><div><strong>${escapeHTML(member.name)}</strong><small>ตอบรับแล้ว ✓ · ช่วยแก้ไขทริปได้</small></div>${isOwner ? `<button type="button" class="text-link" data-remove-trip-member="${escapeHTML(member.user_id)}">นำออก</button>` : ""}</div>`).join("") || '<p class="field-hint">ยังไม่มีเพื่อนกดรับคำเชิญ</p>';
+    $("#revokeTripInvite").hidden = !isOwner || !data.invite_expires_at;
+    $("#createTripInvite").textContent = data.invite_expires_at ? "สร้างลิงก์ใหม่ (ลิงก์เก่าจะใช้ไม่ได้)" : "สร้างลิงก์เชิญเพื่อน";
+    setShareStatus(data.invite_expires_at ? `เปิดรับเพื่อนถึง ${new Date(data.invite_expires_at).toLocaleString("th-TH")}` : "");
+  }
+
+  async function openTripSharing(id) {
+    if (!requireCloudAccount()) return;
+    const trip = trips.find(item => String(item.id) === String(id));
+    if (!trip) return;
+    activeShareTripId = String(id);
+    $("#tripShareDescription").textContent = trip.destination || "ทริปของคุณ";
+    $("#tripShareOwnerControls").hidden = isSharedTrip(id);
+    $("#tripInviteLinkBox").hidden = true;
+    $("#tripInviteLink").value = "";
+    $("#tripMemberList").textContent = "กำลังโหลดผู้ตอบรับ…";
+    setShareStatus("");
+    openDialog("#tripShareDialog");
+    if (!sharingAvailable) {
+      setShareStatus("ยังไม่ได้เปิดระบบเชิญเพื่อนในฐานข้อมูล กรุณารันไฟล์ supabase-trip-sharing.sql ก่อน");
+      $("#tripMemberList").textContent = "";
+      return;
+    }
+    await refreshTripMembers();
+  }
+
+  async function loadTripInvitation() {
+    if (currentPage !== "join") return;
+    joinPreview = null;
+    $("#acceptTripInvite").hidden = true;
+    $("#retryTripInvite").hidden = true;
+    $("#loginForInvite").hidden = true;
+    const content = $("#joinTripContent");
+    const token = new URLSearchParams(location.search).get("invite") || "";
+    if (!/^[a-f0-9]{64}$/.test(token)) { content.textContent = "ลิงก์คำเชิญไม่ครบ ขอให้เพื่อนส่งลิงก์ใหม่อีกครั้ง"; return; }
+    if (!cloudConfigured || !supabaseClient) { content.textContent = "ระบบบัญชียังไม่พร้อม กรุณาลองอีกครั้ง"; $("#retryTripInvite").hidden = false; return; }
+    if (!currentUser) {
+      content.textContent = "เข้าสู่ระบบหรือสมัครสมาชิกก่อน แล้วคุณจะเห็นรายละเอียดและเลือกตอบรับคำเชิญได้";
+      $("#loginForInvite").hidden = false;
+      return;
+    }
+    const userId = currentUser.id;
+    content.textContent = "กำลังตรวจคำเชิญ…";
+    try {
+      const { data, error } = await supabaseClient.rpc("tripmate_invite_preview", { p_token: token });
+      if (currentUser?.id !== userId) return;
+      if (error) throw error;
+      joinPreview = data;
+      content.innerHTML = `<h2>${escapeHTML(data.destination || "ทริปเที่ยว")}</h2><p>${escapeHTML(data.owner_name)} ชวนคุณไปเที่ยวด้วยกัน</p><p>${escapeHTML(formatDate(data.start_date))} – ${escapeHTML(formatDate(data.end_date))}</p><div class="join-permissions">เมื่อกดเข้าร่วม คุณจะดูรายละเอียดและสลิปค่าใช้จ่าย ช่วยแก้แผนทริป และเพิ่มค่าใช้จ่ายได้ สมาชิกคนอื่นจะเห็นชื่อบัญชีและรายการที่คุณเพิ่ม</div>`;
+      $("#acceptTripInvite").textContent = data.joined ? "เปิดทริปที่เข้าร่วมแล้ว" : "ยืนยันเข้าร่วมทริป";
+      $("#acceptTripInvite").hidden = false;
+    } catch (error) {
+      if (currentUser?.id !== userId) return;
+      content.textContent = sharingErrorMessage(error);
+      $("#retryTripInvite").hidden = false;
+    }
+  }
+
+  function initTripSharingEvents() {
+    $("#loginForInvite").addEventListener("click", () => openDialog("#loginDialog"));
+    $("#retryTripInvite").addEventListener("click", () => void loadTripInvitation());
+    $("#refreshTripMembers").addEventListener("click", () => {
+      void refreshTripMembers().catch(error => setShareStatus(sharingErrorMessage(error)));
+    });
+    $("#refreshSharedTrips").addEventListener("click", async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try { if (await refreshSharedTripData()) toast("โหลดทริปล่าสุดแล้ว"); }
+      catch (error) { toast(sharingErrorMessage(error)); }
+      finally { button.disabled = false; }
+    });
+    $("#reloadConflictingTrip").addEventListener("click", async event => {
+      const button = event.currentTarget;
+      const id = button.dataset.tripId;
+      button.disabled = true;
+      try {
+        if (!await refreshSharedTripData()) return;
+        closeDialog($("#tripConflictDialog"));
+        if (activeExpenseTripId === id) { editingExpenseId = null; pendingExpenseDeleteId = null; removeEditingExpenseReceipt = false; renderExpenseDialog(); }
+        else if (currentPage === "planner") {
+          const latest = trips.find(trip => String(trip.id) === id);
+          if (latest) loadTrip(id); else { resetPlanner(); toast("คุณไม่มีสิทธิ์เข้าถึงทริปนี้แล้ว"); }
+        }
+      } catch (error) { toast(sharingErrorMessage(error)); }
+      finally { button.disabled = false; }
+    });
+    $("#acceptTripInvite").addEventListener("click", async event => {
+      if (inviteBusy || !joinPreview || !requireCloudAccount()) return;
+      inviteBusy = true;
+      const button = event.currentTarget;
+      button.disabled = true;
+      const userId = currentUser.id;
+      try {
+        const token = new URLSearchParams(location.search).get("invite");
+        const { data, error } = await supabaseClient.rpc("tripmate_accept_invite", { p_token: token });
+        if (currentUser?.id !== userId) return;
+        if (error) throw error;
+        sessionStorage.setItem(KEYS.tripSaveNotice, "เข้าร่วมทริปแล้ว ช่วยแก้แผนและเพิ่มค่าใช้จ่ายได้เลย");
+        navigateToPage("trips");
+      } catch (error) { $("#joinTripContent").textContent = sharingErrorMessage(error); }
+      finally { inviteBusy = false; button.disabled = false; }
+    });
+    $("#createTripInvite").addEventListener("click", async event => {
+      const access = tripAccess.get(activeShareTripId);
+      if (!access || access.ownerId !== currentUser?.id || inviteBusy) return;
+      const button = event.currentTarget;
+      const shareId = activeShareTripId;
+      button.disabled = true; inviteBusy = true;
+      try {
+        const { data, error } = await supabaseClient.rpc("tripmate_create_invite", { p_trip_id: access.tripId });
+        if (error) throw error;
+        if (shareId !== activeShareTripId || currentUser?.id !== access.ownerId) return;
+        const url = new URL("https://tripmate-1.netlify.app/");
+        url.searchParams.set("page", "join"); url.searchParams.set("invite", data.token);
+        $("#tripInviteLink").value = url.href;
+        $("#tripInviteLinkBox").hidden = false;
+        await refreshTripMembers();
+        setShareStatus("สร้างลิงก์แล้ว คัดลอกส่งให้เพื่อนได้เลย");
+      } catch (error) { setShareStatus(sharingErrorMessage(error)); }
+      finally { button.disabled = false; inviteBusy = false; }
+    });
+    $("#copyTripInvite").addEventListener("click", async () => {
+      const input = $("#tripInviteLink");
+      if (!input.value) return;
+      try { await navigator.clipboard.writeText(input.value); setShareStatus("คัดลอกลิงก์แล้ว ส่งให้เพื่อนทางแชตได้เลย"); }
+      catch { input.focus(); input.select(); setShareStatus("เลือกลิงก์ไว้ให้แล้ว กดคัดลอกเพื่อส่งให้เพื่อน"); }
+    });
+    $("#revokeTripInvite").addEventListener("click", async event => {
+      const access = tripAccess.get(activeShareTripId);
+      if (!access || access.ownerId !== currentUser?.id || inviteBusy) return;
+      const button = event.currentTarget;
+      button.disabled = true; inviteBusy = true;
+      try {
+        const { error } = await supabaseClient.rpc("tripmate_revoke_invite", { p_trip_id: access.tripId });
+        if (error) throw error;
+        $("#tripInviteLink").value = ""; $("#tripInviteLinkBox").hidden = true;
+        await refreshTripMembers(); setShareStatus("ปิดลิงก์แล้ว คนที่ตอบรับก่อนหน้านี้ยังอยู่ในทริป");
+      } catch (error) { setShareStatus(sharingErrorMessage(error)); }
+      finally { button.disabled = false; inviteBusy = false; }
+    });
+    $("#tripMemberList").addEventListener("click", async event => {
+      const button = event.target.closest("[data-remove-trip-member]");
+      const access = tripAccess.get(activeShareTripId);
+      if (!button || !access || access.ownerId !== currentUser?.id || inviteBusy) return;
+      if (!button.dataset.confirmed) { button.dataset.confirmed = "true"; button.textContent = "ยืนยันนำออกและปิดลิงก์เดิม"; return; }
+      button.disabled = true; inviteBusy = true;
+      try {
+        const { error } = await supabaseClient.rpc("tripmate_remove_member", { p_trip_id: access.tripId, p_user_id: button.dataset.removeTripMember });
+        if (error) throw error;
+        $("#tripInviteLink").value = ""; $("#tripInviteLinkBox").hidden = true;
+        await refreshTripMembers(); setShareStatus("นำสมาชิกออกแล้ว ประวัติค่าใช้จ่ายยังอยู่ ลิงก์เดิมถูกปิดแล้ว");
+      } catch (error) { setShareStatus(sharingErrorMessage(error)); }
+      finally { button.disabled = false; inviteBusy = false; }
+    });
+    $("#tripShareDialog").addEventListener("close", () => {
+      activeShareTripId = null; $("#tripInviteLink").value = "";
+    });
+  }
+
   function savePendingPlannerDraft() {
     if (currentPage !== "planner" || !$("#destination").value.trim()) return;
     try {
@@ -230,7 +622,23 @@
 
   function showDatabaseSetupError(error) {
     console.error("Tripmate cloud data error", error);
-    toast("เชื่อมต่อข้อมูลไม่สำเร็จ ตรวจสอบว่ารัน supabase-setup.sql แล้ว");
+    const code = String(error?.code || "");
+    const message = String(error?.message || "");
+    if (code === "42501" || /row-level security|permission denied/i.test(message)) {
+      toast("บันทึกไม่ได้: สิทธิ์ฐานข้อมูลไม่ผ่าน กรุณาตรวจสอบนโยบาย RLS ของตาราง trips");
+      return;
+    }
+    if (code === "42P01" || /relation .* does not exist/i.test(message)) {
+      toast("บันทึกไม่ได้: ยังไม่พบตาราง trips กรุณารัน supabase-setup.sql ใน Supabase");
+      return;
+    }
+    if (code === "PGRST301" || /invalid.*jwt|jwt.*expired/i.test(message)) {
+      toast("เซสชันหมดอายุ กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่");
+      return;
+    }
+    toast(message
+      ? `บันทึกข้อมูลไม่สำเร็จ: ${message.slice(0, 150)}`
+      : "เชื่อมต่อข้อมูลไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตและการตั้งค่า Supabase");
   }
 
   async function ensureCloudProfile(user) {
@@ -246,16 +654,19 @@
   }
 
   async function getCloudTrips(user) {
-    const { data, error } = await supabaseClient
-      .from("trips")
-      .select("id, data, created_at, updated_at")
-      .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
-    if (error) throw error;
-
-    let rows = data || [];
+    const shared = await supabaseClient.rpc("tripmate_my_trips");
+    sharingAvailable = !shared.error;
+    let rows;
+    if (shared.error) {
+      if (!isSharingSetupError(shared.error)) throw shared.error;
+      const { data, error } = await supabaseClient.from("trips")
+        .select("id, user_id, data, created_at, updated_at").eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      rows = data || [];
+    } else rows = Array.isArray(shared.data) ? shared.data : [];
     const migrationStatus = readData(KEYS.legacyTripMigration, null);
-    if (!rows.length && !migrationStatus && migrationPromptedUserId !== user.id) {
+    if (currentPage !== "join" && !rows.length && !migrationStatus && migrationPromptedUserId !== user.id) {
       migrationPromptedUserId = user.id;
       let legacyTrips = readData(KEYS.trips, []);
       if (!Array.isArray(legacyTrips) || !legacyTrips.length) {
@@ -291,12 +702,9 @@
       }
     }
 
-    return rows.map(row => ({
-      ...(row.data && typeof row.data === "object" ? row.data : {}),
-      id: String(row.id),
-      updatedAt: Date.parse(row.updated_at || row.created_at || "") ||
-        Number(row.data?.updatedAt) || Date.now()
-    }));
+    if (currentUser?.id !== user.id) return [];
+    tripAccess.clear();
+    return rows.map(row => mapCloudTrip(row, user.id));
   }
 
   async function getCloudReviews() {
@@ -319,6 +727,14 @@
     const previousId = currentUser?.id || null;
     const accountChanged = Boolean(user && previousId && previousId !== user.id);
     currentUser = user;
+    if (!user || accountChanged) {
+      tripAccess.clear();
+      joinPreview = null;
+      activeShareTripId = null;
+      closeDialog($("#tripShareDialog"));
+      $("#tripInviteLink").value = "";
+      $("#tripMemberList").replaceChildren();
+    }
     if (accountChanged) {
       loadedCloudUserId = null;
       cloudReviewsLoaded = false;
@@ -352,6 +768,7 @@
         }
       }
       updateAccountUI();
+      if (currentPage === "join") void loadTripInvitation();
       return;
     }
 
@@ -375,6 +792,7 @@
       else initializePlannerFromTrips();
       updateAccountUI();
       showPendingTripSaveNotice();
+      if (currentPage === "join") void loadTripInvitation();
     } catch (error) {
       if (currentUser?.id === user.id) {
         trips = [];
@@ -512,6 +930,13 @@
       return;
     }
 
+    if (nearbyWatchId !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(nearbyWatchId);
+      nearbyWatchId = null;
+    }
+    nearbyTrackingActive = false;
+    nearbyLastMappedLocation = null;
+
     $("#nearbyGoogleMap").removeAttribute("src");
     $("#nearbyGoogleMap").hidden = true;
     $("#googleMapCard").hidden = false;
@@ -529,22 +954,70 @@
   }
 
   function buildGoogleMapsUrl(query, location) {
-    const params = new URLSearchParams({
-      api: "1",
-      query: `${query} near ${location.latitude},${location.longitude}`
-    });
-    return `https://www.google.com/maps/search/?${params.toString()}`;
+    const encodedQuery = encodeURIComponent(query);
+    const latitude = Number(location.latitude).toFixed(6);
+    const longitude = Number(location.longitude).toFixed(6);
+    return `https://www.google.com/maps/search/${encodedQuery}/@${latitude},${longitude},13z`;
   }
 
   function buildGoogleMapsEmbedUrl(query, location) {
     const params = new URLSearchParams({
       key: getGoogleMapsApiKey(),
-      q: `${query} near ${location.latitude},${location.longitude}`
+      q: query,
+      center: `${location.latitude},${location.longitude}`,
+      zoom: "13"
     });
     return `https://www.google.com/maps/embed/v1/search?${params.toString()}`;
   }
 
+  function buildGoogleMapsLiveEmbedUrl(location) {
+    const params = new URLSearchParams({
+      key: getGoogleMapsApiKey(),
+      center: `${location.latitude},${location.longitude}`,
+      zoom: "17",
+      maptype: "roadmap"
+    });
+    return `https://www.google.com/maps/embed/v1/view?${params.toString()}`;
+  }
+
+  function distanceBetweenLocations(a, b) {
+    if (!a || !b) return Infinity;
+    const toRadians = value => value * Math.PI / 180;
+    const earthRadius = 6371000;
+    const latitudeDelta = toRadians(b.latitude - a.latitude);
+    const longitudeDelta = toRadians(b.longitude - a.longitude);
+    const firstLatitude = toRadians(a.latitude);
+    const secondLatitude = toRadians(b.latitude);
+    const value = Math.sin(latitudeDelta / 2) ** 2
+      + Math.cos(firstLatitude) * Math.cos(secondLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+    return earthRadius * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+  }
+
+  function showGoogleLiveLocationMap(location, force = false) {
+    nearbyTrackingActive = true;
+    const now = Date.now();
+    const moved = distanceBetweenLocations(nearbyLastMappedLocation, location);
+    if (force || moved >= 5 || now - nearbyLastMapUpdate >= 10000) {
+      const frame = $("#nearbyGoogleMap");
+      frame.src = buildGoogleMapsLiveEmbedUrl(location);
+      frame.hidden = false;
+      nearbyLastMappedLocation = { ...location };
+      nearbyLastMapUpdate = now;
+    }
+    $("#googleMapCard").hidden = true;
+    $("#nearbyMapHeading").textContent = "ตำแหน่งของคุณแบบเรียลไทม์";
+    $("#googleCurrentSearchLink").href = buildGoogleMapsUrl("สถานที่ท่องเที่ยว", location);
+    $("#googleCurrentSearchLink").hidden = false;
+    $("#nearbyStatus").textContent = "กำลังติดตามตำแหน่งแบบเรียลไทม์ แผนที่จะเลื่อนตามพิกัดเมื่อคุณเคลื่อนที่";
+    setNearbySearchButton(false, "กำลังติดตามตำแหน่ง");
+    $$("[data-nearby-query]", $("#nearbyResultList")).forEach(button => {
+      button.setAttribute("aria-pressed", "false");
+      button.classList.remove("active");
+    });
+  }
+
   function showGoogleNearbyMap(query, location) {
+    nearbyTrackingActive = false;
     selectedNearbyQuery = query;
     const category = NEARBY_CATEGORIES.find(item => item.query === query) || NEARBY_CATEGORIES[0];
     const frame = $("#nearbyGoogleMap");
@@ -559,9 +1032,11 @@
       button.setAttribute("aria-pressed", String(active));
       button.classList.toggle("active", active);
     });
+    $("#nearbyStatus").textContent = "กำลังแสดงสถานที่โดยยึดตำแหน่งปัจจุบันเป็นจุดศูนย์กลาง และเน้นพื้นที่ใกล้เคียงประมาณ 10 กม.";
+    setNearbySearchButton(false, "กลับมาติดตามตำแหน่ง");
   }
 
-  function renderGoogleNearbySearches(location, query = "สถานที่ท่องเที่ยว") {
+  function renderGoogleNearbySearches(location) {
     $("#nearbyResultList").innerHTML = NEARBY_CATEGORIES.map(category => `
       <article class="nearby-place">
         <span class="nearby-place-icon" aria-hidden="true">${category.icon}</span>
@@ -569,9 +1044,7 @@
         <button class="nearby-directions" type="button" data-nearby-query="${escapeHTML(category.query)}" aria-pressed="false">แสดง</button>
       </article>
     `).join("");
-    showGoogleNearbyMap(query, location);
-    $("#nearbyStatus").textContent = "เลือกหมวดหมู่เพื่อค้นหาสถานที่รอบตำแหน่งของคุณ หรือเปิดผลลัพธ์บน Google Maps";
-    setNearbySearchButton(false, "อัปเดตตำแหน่ง");
+    showGoogleLiveLocationMap(location, true);
   }
 
   function locateAndSearchNearby() {
@@ -591,14 +1064,25 @@
       return;
     }
 
-    setNearbySearchButton(true, "กำลังระบุตำแหน่ง...");
-    $("#nearbyStatus").textContent = "กำลังขออนุญาตใช้ตำแหน่งจากเบราว์เซอร์ของคุณ";
-    navigator.geolocation.getCurrentPosition(position => {
+    if (nearbyWatchId !== null && nearbyLocation) {
+      showGoogleLiveLocationMap(nearbyLocation, true);
+      return;
+    }
+
+    setNearbySearchButton(true, "กำลังเปิด GPS...");
+    $("#nearbyStatus").textContent = "กำลังขออนุญาตและเริ่มติดตามตำแหน่งจากอุปกรณ์ของคุณ";
+    nearbyTrackingActive = true;
+    nearbyWatchId = navigator.geolocation.watchPosition(position => {
       nearbyLocation = {
         latitude: position.coords.latitude,
-        longitude: position.coords.longitude
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy
       };
-      renderGoogleNearbySearches(nearbyLocation);
+      if (!$("#nearbyResultList").querySelector("[data-nearby-query]")) {
+        renderGoogleNearbySearches(nearbyLocation);
+      } else if (nearbyTrackingActive) {
+        showGoogleLiveLocationMap(nearbyLocation);
+      }
     }, error => {
       const messages = {
         1: "ยังไม่ได้รับอนุญาตใช้ตำแหน่ง โปรดอนุญาตตำแหน่งในเบราว์เซอร์แล้วลองอีกครั้ง",
@@ -607,11 +1091,15 @@
       };
       const message = messages[error.code] || "เกิดปัญหาในการระบุตำแหน่ง โปรดลองอีกครั้ง";
       $("#nearbyStatus").textContent = message;
-      setNearbySearchButton(false, nearbyLocation ? "อัปเดตตำแหน่ง" : "ค้นหาจากตำแหน่งของฉัน");
+      setNearbySearchButton(false, nearbyLocation ? "กลับมาติดตามตำแหน่ง" : "ค้นหาจากตำแหน่งของฉัน");
+      if (error.code === 1) {
+        nearbyWatchId = null;
+        nearbyTrackingActive = false;
+      }
     }, {
       enableHighAccuracy: true,
       maximumAge: 0,
-      timeout: 18000
+      timeout: 20000
     });
   }
 
@@ -661,6 +1149,16 @@
     });
   }
 
+  function populateDiscoverProvinceOptions() {
+    const select = $("#discoverProvince");
+    THAI_PROVINCES.forEach(province => {
+      const option = document.createElement("option");
+      option.value = province;
+      option.textContent = province;
+      select.append(option);
+    });
+  }
+
   function setDestinationValue(destination) {
     const select = $("#destination");
     const value = String(destination || "");
@@ -696,529 +1194,6 @@
 
   function getPeopleCount() {
     return 1 + friends.filter(friend => friend.going).length;
-  }
-
-  function clearSmartTripPlan() {
-    smartPlan = null;
-    const result = $("#smartTripResult");
-    if (!result) return;
-    result.hidden = true;
-    result.innerHTML = "";
-  }
-
-  function updatePremiumUI() {
-    const button = $("#generateSmartTrip");
-    const badge = $("#smartPremiumBadge");
-    const hint = $("#smartPremiumHint");
-    if (!button || !badge || !hint) return;
-
-    button.textContent = isPremiumDemo ? "✦ จัดทริปตามงบ" : "🔒 สมัคร Premium";
-    badge.textContent = isPremiumDemo ? "DEMO ACTIVE" : "PREMIUM";
-    badge.classList.toggle("active", isPremiumDemo);
-    hint.textContent = isPremiumDemo
-      ? "เปิดสิทธิ์ Premium โหมดเดโมแล้ว · เลือกสไตล์ จังหวะเที่ยว และแนวที่สนใจได้"
-      : "ฟีเจอร์ Premium · ใช้จังหวัด วันเดินทาง จำนวนคน งบ และรูปแบบเที่ยวที่คุณเลือก";
-
-    const unlockButton = $("#premiumDemoUnlock");
-    const disableButton = $("#disablePremiumDemo");
-    const paymentNotice = $("#premiumPaymentNotice");
-    if (unlockButton) unlockButton.hidden = isPremiumDemo;
-    if (disableButton) disableButton.hidden = !isPremiumDemo;
-    if (paymentNotice && isPremiumDemo) {
-      paymentNotice.textContent = "กำลังใช้สิทธิ์ Premium โหมดเดโมในเบราว์เซอร์นี้ ยังไม่มีการสมัครหรือเรียกเก็บเงินจริง";
-    } else if (paymentNotice) {
-      paymentNotice.textContent = "ระบบสมัครสมาชิกและชำระเงินจริงยังไม่เชื่อมต่อ ปุ่มด้านล่างเป็นโหมดเดโมและไม่มีการเรียกเก็บเงิน";
-    }
-  }
-
-  function openPremiumDialog() {
-    updatePremiumUI();
-    openDialog("#premiumDialog");
-  }
-
-  function enablePremiumDemo() {
-    isPremiumDemo = true;
-    saveData(KEYS.premiumDemo, true);
-    updatePremiumUI();
-    closeDialog($("#premiumDialog"));
-    toast("เปิด Premium โหมดเดโมแล้ว · ไม่มีการชำระเงินจริง");
-  }
-
-  function disablePremiumDemo() {
-    isPremiumDemo = false;
-    saveData(KEYS.premiumDemo, false);
-    updatePremiumUI();
-    renderSmartTripPlan(smartPlan);
-    toast("ปิดสิทธิ์ Premium โหมดเดโมแล้ว");
-  }
-
-  function smartBudgetBaseShares(style, days) {
-    const profiles = {
-      budget: days === 1 ? [31, 42, 0, 27] : [25, 33, 27, 15],
-      balanced: days === 1 ? [32, 40, 0, 28] : [24, 32, 30, 14],
-      comfort: days === 1 ? [29, 39, 0, 32] : [22, 29, 37, 12]
-    };
-    return [...(profiles[style] || profiles.balanced)];
-  }
-
-  function allocateBudget(amount, shares) {
-    const totalShare = shares.reduce((sum, share) => sum + share, 0) || 1;
-    const amounts = shares.map(() => 0);
-    const activeIndices = shares
-      .map((share, index) => share > 0 ? index : -1)
-      .filter(index => index >= 0);
-    let allocated = 0;
-
-    shares.forEach((share, index) => {
-      if (share <= 0) return;
-      const value = index === activeIndices[activeIndices.length - 1]
-        ? amount - allocated
-        : Math.floor(amount * share / totalShare);
-      amounts[index] = value;
-      allocated += value;
-    });
-
-    return amounts;
-  }
-
-  function smartMapSearch(query, destination) {
-    const search = `${query} ${destination}`;
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(search)}`;
-  }
-
-  const SMART_INTERESTS = {
-    culture: {
-      label: "วัฒนธรรม",
-      icon: "🏛️",
-      options: [
-        { title: "เริ่มวันด้วยวัดหรือสถานที่ประวัติศาสตร์", query: "วัดและสถานที่ประวัติศาสตร์" },
-        { title: "แวะพิพิธภัณฑ์หรือแหล่งเรียนรู้ของจังหวัด", query: "พิพิธภัณฑ์และแหล่งเรียนรู้" },
-        { title: "เดินสำรวจย่านเก่าและสถาปัตยกรรมท้องถิ่น", query: "ย่านเมืองเก่า สถาปัตยกรรม" }
-      ]
-    },
-    nature: {
-      label: "ธรรมชาติ",
-      icon: "🌿",
-      options: [
-        { title: "เลือกจุดชมวิวหรือเส้นทางธรรมชาติใกล้กัน", query: "จุดชมวิว เส้นทางธรรมชาติ" },
-        { title: "พักผ่อนที่สวน น้ำตก หรือพื้นที่สีเขียว", query: "สวนสาธารณะ น้ำตก ธรรมชาติ" },
-        { title: "วางจุดแวะกลางแจ้งโดยเผื่อเวลาเดินทาง", query: "อุทยาน จุดชมวิว ที่เที่ยวธรรมชาติ" }
-      ]
-    },
-    food: {
-      label: "ของกิน",
-      icon: "🍜",
-      options: [
-        { title: "ชิมอาหารท้องถิ่นในย่านที่เดินทางสะดวก", query: "อาหารท้องถิ่น" },
-        { title: "เดินตลาดเพื่อเลือกมื้ออาหารตามงบ", query: "ตลาดท้องถิ่น ของกิน" },
-        { title: "ลองร้านอาหารที่ตรงกับรูปแบบอาหารที่เลือก", query: "ร้านอาหาร" }
-      ]
-    },
-    cafe: {
-      label: "คาเฟ่",
-      icon: "☕",
-      options: [
-        { title: "พักคาเฟ่ใกล้เส้นทางเที่ยวหลัก", query: "คาเฟ่ใกล้สถานที่ท่องเที่ยว" },
-        { title: "เลือกคาเฟ่ท้องถิ่นเป็นจุดพักระหว่างวัน", query: "คาเฟ่ท้องถิ่น" },
-        { title: "แวะร้านกาแฟและเผื่อเวลาพักก่อนเดินทางต่อ", query: "ร้านกาแฟ คาเฟ่" }
-      ]
-    },
-    adventure: {
-      label: "กิจกรรม",
-      icon: "🧗",
-      options: [
-        { title: "เลือกกิจกรรมกลางแจ้งที่เหมาะกับเวลาและงบ", query: "กิจกรรมกลางแจ้ง ผจญภัย" },
-        { title: "ค้นหากิจกรรมในพื้นที่และตรวจสอบการจองล่วงหน้า", query: "กิจกรรมท่องเที่ยว จอง" },
-        { title: "จัดกิจกรรมหลักหนึ่งอย่างแล้วเว้นเวลาพัก", query: "กิจกรรมท่องเที่ยวในจังหวัด" }
-      ]
-    },
-    shopping: {
-      label: "ตลาด/ช้อปปิ้ง",
-      icon: "🛍️",
-      options: [
-        { title: "เดินตลาดชุมชนและลองของกินระหว่างทาง", query: "ตลาดชุมชน" },
-        { title: "แวะย่านของฝากโดยกำหนดงบซื้อของไว้ก่อน", query: "ร้านของฝาก ตลาดท้องถิ่น" },
-        { title: "เลือกถนนคนเดินหรือตลาดตามวันเปิดทำการ", query: "ถนนคนเดิน ตลาดนัด" }
-      ]
-    },
-    beach: {
-      label: "ทะเล",
-      icon: "🏖️",
-      options: [
-        { title: "จัดช่วงพักริมทะเลและเช็กสภาพอากาศก่อนเดินทาง", query: "ชายหาด ทะเล" },
-        { title: "ค้นหาจุดชมวิวชายฝั่งที่อยู่ในเส้นทางเดียวกัน", query: "จุดชมวิวชายทะเล" },
-        { title: "เลือกกิจกรรมทะเลและตรวจสอบราคา/เงื่อนไขก่อนจอง", query: "กิจกรรมทางทะเล" }
-      ]
-    }
-  };
-
-  function getSelectedSmartInterests() {
-    return $$('input[name="smartInterest"]:checked')
-      .map(input => input.value)
-      .filter(value => Object.prototype.hasOwnProperty.call(SMART_INTERESTS, value));
-  }
-
-  function smartBudgetShares(style, days, transportMode, stayMode) {
-    const shares = smartBudgetBaseShares(style, days);
-    const transfer = (from, to, amount) => {
-      const moved = Math.min(shares[from], amount);
-      shares[from] -= moved;
-      shares[to] += moved;
-    };
-
-    const transportAdjustments = {
-      "เครื่องบิน": 10,
-      "รถยนต์ส่วนตัว": 6,
-      "เรือ": 6,
-      "รถไฟ": 3,
-      "รถโดยสาร": -3
-    };
-    const transportShift = transportAdjustments[transportMode] || 0;
-    if (transportShift > 0) transfer(3, 0, transportShift);
-    if (transportShift < 0) transfer(0, 3, Math.abs(transportShift));
-
-    if (days > 1 && stayMode === "แคมป์ปิ้ง") transfer(2, 3, 8);
-    if (days > 1 && stayMode === "โฮมสเตย์") transfer(2, 1, 4);
-    if (days > 1 && stayMode === "รีสอร์ต") transfer(3, 2, 8);
-
-    return shares;
-  }
-
-  function createSmartActivity(category, day, slot, foodType) {
-    const interest = SMART_INTERESTS[category] || SMART_INTERESTS.food;
-    const option = interest.options[(day + slot - 1) % interest.options.length];
-    const foodQuery = foodType && foodType !== "กินได้ทุกอย่าง"
-      ? `${foodType} ${option.query}`
-      : option.query;
-
-    return {
-      category,
-      label: interest.label,
-      icon: interest.icon,
-      title: option.title,
-      query: category === "food" ? foodQuery : option.query
-    };
-  }
-
-  function buildSmartDailyBudgets(plan) {
-    const days = Math.max(1, Math.min(30, Number(plan.days) || 1));
-    const evenWeights = Array(days).fill(1);
-    const travelWeights = [...evenWeights];
-    if (days > 1) {
-      travelWeights[0] = 1.35;
-      travelWeights[days - 1] = 1.2;
-    }
-    const nightWeights = Array.from({ length: days }, (_, index) =>
-      index < days - 1 ? 1 : 0
-    );
-    const transportByDay = allocateBudget(Number(plan.transport) || 0, travelWeights);
-    const foodByDay = allocateBudget(Number(plan.food) || 0, evenWeights);
-    const stayByDay = allocateBudget(Number(plan.stay) || 0, nightWeights);
-    const otherByDay = allocateBudget(Number(plan.other) || 0, evenWeights);
-
-    return Array.from({ length: days }, (_, index) => {
-      const day = {
-        transport: transportByDay[index],
-        food: foodByDay[index],
-        stay: stayByDay[index],
-        other: otherByDay[index]
-      };
-      day.total = day.transport + day.food + day.stay + day.other;
-      return day;
-    });
-  }
-
-  function buildSmartDayPlans(plan) {
-    const days = Math.max(1, Math.min(30, Number(plan.days) || 1));
-    const interests = Array.isArray(plan.interests) && plan.interests.length
-      ? plan.interests
-      : getSelectedSmartInterests();
-    const nonFoodInterests = interests.filter(interest => interest !== "food");
-    const activityCounts = { relaxed: 2, balanced: 3, packed: 4 };
-    const activityCount = activityCounts[plan.pace] || activityCounts.balanced;
-    const times = {
-      2: ["09:00", "17:30"],
-      3: ["09:00", "13:30", "17:30"],
-      4: ["08:30", "11:30", "14:30", "18:00"]
-    }[activityCount];
-    const dailyBudgets = Array.isArray(plan.dailyBudgets)
-      ? plan.dailyBudgets
-      : buildSmartDailyBudgets(plan);
-
-    return Array.from({ length: days }, (_, index) => {
-      const day = index + 1;
-      const activities = Array.from({ length: activityCount }, (_, slot) => {
-        let category;
-        if (slot === activityCount - 1) {
-          category = "food";
-        } else if (nonFoodInterests.length) {
-          category = nonFoodInterests[(day + slot - 1) % nonFoodInterests.length];
-        } else {
-          category = interests[(day + slot - 1) % interests.length] || "food";
-        }
-        return {
-          time: times[slot],
-          ...createSmartActivity(category, day, slot, plan.foodType)
-        };
-      });
-
-      const date = plan.startDate ? new Date(`${plan.startDate}T00:00:00`) : null;
-      if (date && !Number.isNaN(date.getTime())) date.setDate(date.getDate() + index);
-      const dateLabel = date && !Number.isNaN(date.getTime())
-        ? formatDate(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`)
-        : `วันที่ ${day}`;
-
-      return {
-        day,
-        dateLabel,
-        budget: dailyBudgets[index] || { transport: 0, food: 0, stay: 0, other: 0, total: 0 },
-        activities
-      };
-    });
-  }
-
-  function getSmartPlanInsights(plan) {
-    const insights = [];
-    if (plan.days === 1) {
-      insights.push("ทริปวันเดียวไม่กันงบที่พัก เพื่อย้ายงบไปใช้กับการเดินทาง อาหาร และกิจกรรมแทน");
-    } else if (plan.stayType === "แคมป์ปิ้ง") {
-      insights.push("ลดสัดส่วนที่พักสำหรับแคมป์ปิ้ง และเพิ่มงบกิจกรรม/อุปกรณ์ไว้เผื่อ");
-    } else if (plan.stayType === "โฮมสเตย์") {
-      insights.push("จัดงบที่พักแบบโฮมสเตย์และเผื่อค่าอาหารท้องถิ่นเพิ่มขึ้น");
-    } else {
-      insights.push(`จัดสรรค่าที่พักสำหรับ ${plan.days - 1} คืนตามรูปแบบที่เลือก`);
-    }
-
-    if (plan.transportType === "เครื่องบิน") {
-      insights.push("กันสัดส่วนค่าเดินทางเพิ่มสำหรับการเดินทางด้วยเครื่องบิน และควรเช็กราคารวมสัมภาระก่อนจอง");
-    } else if (plan.transportType === "รถยนต์ส่วนตัว") {
-      insights.push("รวมงบเดินทางเผื่อน้ำมันและค่าทางด่วน แล้วเช็กระยะทางระหว่างจุดเที่ยวก่อนออกเดินทาง");
-    } else {
-      insights.push("วางจุดเที่ยวใกล้กันในแต่ละวันเพื่อลดเวลาและค่าเดินทางต่อพื้นที่");
-    }
-
-    if (plan.perPersonPerDay < 500) {
-      insights.push("งบใช้ต่อคนต่อวันค่อนข้างจำกัด ลองเน้นจุดเข้าฟรีและกำหนดงบอาหารก่อนออกเดินทาง");
-    } else if (plan.perPersonPerDay > 2500) {
-      insights.push("มีงบต่อคนต่อวันค่อนข้างยืดหยุ่น แนะนำกันเงินสำรองไว้สำหรับกิจกรรมหรือค่าใช้จ่ายหน้างาน");
-    } else {
-      insights.push("เฉลี่ยงบใช้ต่อคนต่อวันให้แล้ว ปรับราคาและค่าเข้าชมตามข้อมูลจริงก่อนจอง");
-    }
-    return insights;
-  }
-
-  function renderSmartTripPlan(plan) {
-    const result = $("#smartTripResult");
-    if (!result) return;
-
-    if (!isPremiumDemo) {
-      if (plan) {
-        result.innerHTML = `
-          <div class="premium-locked-preview">
-            <span class="premium-lock-icon" aria-hidden="true">🔒</span>
-            <div><strong>แผนนี้ใช้ Smart Budget Trip</strong><p>ปลดล็อก Premium เพื่อดูรายละเอียดงบและร่างแผนเที่ยวที่บันทึกไว้</p></div>
-            <button class="btn btn-green" type="button" data-open-premium>ดู Premium</button>
-          </div>
-        `;
-        result.hidden = false;
-      } else {
-        result.hidden = true;
-        result.innerHTML = "";
-      }
-      return;
-    }
-
-    if (!plan) return;
-
-    const destination = plan.destination || $("#destination").value.trim();
-    const labels = {
-      budget: "ประหยัด",
-      balanced: "สมดุล",
-      comfort: "สะดวกสบาย"
-    };
-    const paceLabels = {
-      relaxed: "สบาย ๆ",
-      balanced: "พอดี",
-      packed: "เก็บให้ครบ"
-    };
-    const categories = [
-      ["🚆", "ค่าเดินทาง", Number(plan.transport) || 0],
-      ["🍜", "ค่าอาหาร", Number(plan.food) || 0],
-      ["🛏️", "ค่าที่พัก", Number(plan.stay) || 0],
-      ["🎟️", "กิจกรรม/อื่น ๆ", Number(plan.other) || 0]
-    ];
-    const days = Math.max(1, Math.min(30, Number(plan.days) || 1));
-    const people = Math.max(1, Number(plan.people) || getPeopleCount());
-    const plannedSpend = Number(plan.plannedSpend) || categories.reduce((sum, [, , value]) => sum + value, 0);
-    const budget = Number(plan.budget) || plannedSpend + (Number(plan.reserve) || 0);
-    const reserve = Number(plan.reserve) || Math.max(0, budget - plannedSpend);
-    const plannedPercentage = budget > 0
-      ? Math.min(100, Math.max(0, Math.round(plannedSpend / budget * 100)))
-      : 0;
-    const perPersonPerDay = Number(plan.perPersonPerDay) || plannedSpend / people / days;
-    const interests = Array.isArray(plan.interests) && plan.interests.length
-      ? plan.interests
-      : getSelectedSmartInterests();
-    const selectedInterests = interests.map(value => SMART_INTERESTS[value]?.label).filter(Boolean);
-    const dailyPlans = Array.isArray(plan.dailyPlans) && plan.dailyPlans.length
-      ? plan.dailyPlans.slice(0, days)
-      : buildSmartDayPlans({ ...plan, days, dailyBudgets: plan.dailyBudgets });
-    const displayedDays = Math.min(days, 10);
-    const daysHtml = dailyPlans.slice(0, displayedDays).map(dayPlan => {
-      const dayBudget = dayPlan.budget || {};
-      const dailyCategories = [
-        ["เดินทาง", Number(dayBudget.transport) || 0],
-        ["อาหาร", Number(dayBudget.food) || 0],
-        ["ที่พัก", Number(dayBudget.stay) || 0],
-        ["กิจกรรม", Number(dayBudget.other) || 0]
-      ];
-      return `
-        <article class="smart-day-card">
-          <div class="smart-day-top">
-            <div class="smart-day-title"><span>DAY ${String(dayPlan.day).padStart(2, "0")}</span><strong>${escapeHTML(dayPlan.dateLabel || `วันที่ ${dayPlan.day}`)}</strong></div>
-            <div class="smart-day-limit"><strong>${money(Number(dayBudget.total) || 0)}</strong><small>งบรวมวันนี้ · ${money((Number(dayBudget.total) || 0) / people)} / คน</small></div>
-          </div>
-          <div class="smart-day-costs">
-            ${dailyCategories.map(([label, value]) => `<span>${label} <b>${money(value)}</b></span>`).join("")}
-          </div>
-          <div class="smart-day-activities">
-            ${(dayPlan.activities || []).map(activity => `
-              <div class="smart-day-idea">
-                <span>${escapeHTML(activity.time)} · ${escapeHTML(activity.icon || "📍")} ${escapeHTML(activity.label || "กิจกรรม")}</span>
-                <p>${escapeHTML(activity.title)}</p>
-                <a href="${escapeHTML(smartMapSearch(activity.query, destination))}" target="_blank" rel="noopener noreferrer">ค้นหาใน Google Maps ↗</a>
-              </div>
-            `).join("")}
-          </div>
-        </article>
-      `;
-    }).join("");
-
-    result.innerHTML = `
-      <div class="smart-result-header">
-        <div><span class="section-kicker">YOUR SMART PLAN</span><h3>แผนเที่ยว ${escapeHTML(destination)} ตามงบ</h3><p>${escapeHTML(formatDate(plan.startDate))} – ${escapeHTML(formatDate(plan.endDate))} · ${days} วัน · ${people} คน</p></div>
-        <span class="smart-style-badge">${labels[plan.style] || labels.balanced} · ${paceLabels[plan.pace] || paceLabels.balanced}</span>
-      </div>
-      <div class="smart-budget-progress">
-        <div><span>งบรวมทริป</span><strong>${money(budget)}</strong></div>
-        <div class="smart-budget-meter" role="progressbar" aria-label="สัดส่วนงบที่จัดสรร" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${plannedPercentage}"><span style="width:${plannedPercentage}%"></span></div>
-        <small>จัดสรรสำหรับทริป ${money(plannedSpend)} · กันเงินสำรอง ${money(reserve)}</small>
-      </div>
-      <p class="smart-applied-note">✓ ใส่งบแนะนำในช่องค่าใช้จ่ายด้านบนแล้ว ปรับตัวเลขเองได้ก่อนบันทึก</p>
-      <div class="smart-budget-stats">
-        <div><span>งบที่ใช้ตามแผน</span><strong>${money(plannedSpend)}</strong></div>
-        <div><span>เงินสำรอง 10%</span><strong>${money(reserve)}</strong></div>
-        <div><span>งบใช้ต่อคน / วัน</span><strong>${money(perPersonPerDay)}</strong></div>
-        <div><span>งบรวมเฉลี่ย / คน</span><strong>${money(budget / people)}</strong></div>
-      </div>
-      <div class="smart-breakdown" aria-label="สัดส่วนงบที่แนะนำ">
-        ${categories.map(([icon, label, value]) => {
-          const percentage = plannedSpend > 0 ? Math.round(value / plannedSpend * 100) : 0;
-          return `
-            <div class="smart-budget-row">
-              <div class="smart-budget-row-heading"><span>${icon} ${label} <small>${percentage}%</small></span><strong>${money(value)}</strong></div>
-              <div class="smart-budget-meter" role="progressbar" aria-label="${label}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div>
-              <small>เฉลี่ย ${money(value / people / days)} ต่อคน / วัน</small>
-            </div>
-          `;
-        }).join("")}
-      </div>
-      <section class="smart-insights" aria-label="ข้อแนะนำสำหรับทริปนี้">
-        <strong>✦ ข้อแนะนำสำหรับทริปนี้</strong>
-        <ul>${getSmartPlanInsights({ ...plan, days, perPersonPerDay }).map(insight => `<li>${escapeHTML(insight)}</li>`).join("")}</ul>
-      </section>
-      <div class="smart-preference-summary"><span>สไตล์ที่เลือก</span><b>${escapeHTML(selectedInterests.join(" · ") || "ยังไม่ได้เลือกแนวเที่ยว")}</b><span>อาหาร: ${escapeHTML(plan.foodType || "ไม่ระบุ")} · ที่พัก: ${escapeHTML(plan.stayType || "ไม่ระบุ")}</span></div>
-      <div class="smart-itinerary-heading"><strong>แผนเที่ยวรายวัน</strong><span>${days} วัน · จังหวะ${paceLabels[plan.pace] || paceLabels.balanced}</span></div>
-      <div class="smart-itinerary-list">${daysHtml}</div>
-      ${days > displayedDays ? `<p class="smart-estimate-note">แสดง ${displayedDays} วันแรก จากทั้งหมด ${days} วัน</p>` : ""}
-      <div class="smart-result-footer"><p>ค่าใช้จ่ายเป็นประมาณการ ระบบไม่ได้ดึงราคาจริงหรือยืนยันเวลาเปิดทำการ โปรดตรวจสอบก่อนจอง</p><button class="btn btn-dark" type="button" data-save-smart-trip>บันทึกทริปนี้ ↗</button></div>
-    `;
-    result.hidden = false;
-  }
-
-  function generateSmartTrip() {
-    if (!isPremiumDemo) {
-      openPremiumDialog();
-      return;
-    }
-
-    const destination = $("#destination").value.trim();
-    const start = $("#startDate").value;
-    const end = $("#endDate").value;
-    const days = durationDays(start, end);
-    const budget = Number($("#budget").value);
-
-    if (!destination) {
-      toast("เลือกจังหวัดปลายทางก่อนจัดทริปตามงบ");
-      $("#destination").focus();
-      return;
-    }
-    if (days === null) {
-      toast("เลือกวันไปและวันกลับให้ถูกต้องก่อนจัดทริป");
-      (!start ? $("#startDate") : $("#endDate")).focus();
-      return;
-    }
-    if (!Number.isFinite(budget) || budget <= 0) {
-      toast("กรอกงบประมาณรวมเป็นตัวเลขมากกว่า 0");
-      $("#budget").focus();
-      return;
-    }
-
-    const style = $("#smartTripStyle").value;
-    const people = getPeopleCount();
-    if (days > 30) {
-      toast("Smart Budget รองรับการจัดแผนไม่เกิน 30 วันต่อครั้ง");
-      return;
-    }
-    const reserve = Math.round(budget * 0.1);
-    const plannedSpend = Math.max(0, budget - reserve);
-    const interests = getSelectedSmartInterests();
-    if (!interests.length) {
-      toast("เลือกแนวเที่ยวอย่างน้อย 1 แบบก่อนสร้างแผน");
-      $("input[name='smartInterest']").focus();
-      return;
-    }
-
-    const shares = smartBudgetShares(
-      style,
-      days,
-      $("#transportType").value,
-      $("#stayType").value
-    );
-
-    const [transport, food, stay, other] = allocateBudget(plannedSpend, shares);
-    $("#transport").value = transport;
-    $("#food").value = food;
-    $("#stay").value = stay;
-    $("#other").value = other;
-
-    smartPlan = {
-      style,
-      pace: $("#smartTripPace").value,
-      interests,
-      destination,
-      startDate: start,
-      endDate: end,
-      days,
-      people,
-      budget,
-      reserve,
-      plannedSpend,
-      perPersonPerDay: plannedSpend / people / days,
-      transportType: $("#transportType").value,
-      foodType: $("#foodType").value,
-      stayType: $("#stayType").value,
-      transport,
-      food,
-      stay,
-      other
-    };
-    smartPlan.dailyBudgets = buildSmartDailyBudgets(smartPlan);
-    smartPlan.dailyPlans = buildSmartDayPlans(smartPlan);
-    updateSummary();
-    renderSmartTripPlan(smartPlan);
-    $("#smartTripResult").scrollIntoView({ behavior: "smooth", block: "nearest" });
-    toast("จัดสรรงบและร่างแผนเที่ยวให้แล้ว");
   }
 
   function updateSummary() {
@@ -1276,7 +1251,6 @@
 
     if (destination) step = 2;
     if (destination && duration !== null) step = 3;
-    if (destination && duration !== null && friends.length > 0) step = 4;
 
     $("#stepNumber").textContent = String(step).padStart(2, "0");
 
@@ -1311,7 +1285,7 @@
 
         <div class="friend-info">
           <b>${escapeHTML(friend.name)}</b>
-          <small>${friend.going ? "ยืนยันร่วมทริป" : "ยังไม่ยืนยัน"}</small>
+          <small>${friend.userId ? "ตอบรับด้วยบัญชีแล้ว ✓" : friend.going ? "เพิ่มชื่อไว้ในแผน" : "ยังไม่ร่วมเดินทาง"}</small>
         </div>
 
         <label class="friend-confirm">
@@ -1319,6 +1293,7 @@
             type="checkbox"
             data-friend-going="${index}"
             ${friend.going ? "checked" : ""}
+            ${friend.userId ? "disabled" : ""}
           >
           ไปแน่
         </label>
@@ -1328,6 +1303,7 @@
           class="remove-friend"
           data-remove-friend="${index}"
           aria-label="ลบเพื่อน"
+          ${friend.userId ? "hidden" : ""}
         >×</button>
       </div>
     `).join("");
@@ -1355,8 +1331,6 @@
     }
 
     friends.push({ name, going: true });
-    clearSmartTripPlan();
-
     input.value = "";
     renderFriends();
     toast("เพิ่มเพื่อนเรียบร้อยแล้ว");
@@ -1405,8 +1379,15 @@
 
   function collectTrip() {
     const costs = getCosts();
+    const previousTrip = editingTripId
+      ? trips.find(item => String(item.id) === String(editingTripId))
+      : null;
+
+    const previousTripData = { ...(previousTrip || {}) };
+    delete previousTripData.smartPlan;
 
     return {
+      ...previousTripData,
       id: editingTripId || (
         globalThis.crypto?.randomUUID?.() ||
         `trip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -1416,7 +1397,8 @@
       endDate: $("#endDate").value,
       friends: friends.map(friend => ({
         name: friend.name,
-        going: friend.going
+        going: friend.going,
+        ...(friend.userId ? { userId: friend.userId } : {})
       })),
       budget: costs.budget,
       transport: costs.transport,
@@ -1426,12 +1408,16 @@
       transportType: $("#transportType").value,
       foodType: $("#foodType").value,
       stayType: $("#stayType").value,
-      smartPlan: isPremiumDemo && smartPlan ? { ...smartPlan } : null,
+      expenses: Array.isArray(previousTrip?.expenses) ? previousTrip.expenses : [],
       updatedAt: Date.now()
     };
   }
 
   async function saveTrip() {
+    if (plannerSaving) return;
+    plannerSaving = true;
+    $("#saveTrip").disabled = true;
+    try {
     if (!validatePlanner()) return;
     if (cloudConfigured && !requireCloudAccount()) return;
 
@@ -1442,17 +1428,7 @@
       : [trip, ...trips];
 
     if (cloudConfigured) {
-      const timestamp = new Date(trip.updatedAt).toISOString();
-      const { error } = await supabaseClient.from("trips").upsert({
-        id: String(trip.id),
-        user_id: currentUser.id,
-        data: trip,
-        updated_at: timestamp
-      }, { onConflict: "user_id,id" });
-      if (error) {
-        showDatabaseSetupError(error);
-        return;
-      }
+      if (!await writeCloudTrip(trip)) return;
     } else if (!saveData(KEYS.trips, nextTrips)) {
       return;
     }
@@ -1467,11 +1443,14 @@
       sessionStorage.setItem(KEYS.tripSaveNotice, successMessage);
     } catch {}
     navigateToPage("trips");
+    } catch (error) { toast(sharingErrorMessage(error)); } finally {
+      plannerSaving = false;
+      $("#saveTrip").disabled = false;
+    }
   }
 
   function resetPlanner() {
     editingTripId = null;
-    clearSmartTripPlan();
     $("#plannerForm").reset();
     $$("#destination [data-legacy-destination]").forEach(option => option.remove());
     $("#destination").value = "";
@@ -1513,17 +1492,6 @@
     $("#transportType").value = trip.transportType || "ยังไม่แน่ใจ";
     $("#foodType").value = trip.foodType || "กินได้ทุกอย่าง";
     $("#stayType").value = trip.stayType || "ยังไม่แน่ใจ";
-    smartPlan = trip.smartPlan && typeof trip.smartPlan === "object"
-      ? { ...trip.smartPlan }
-      : null;
-    $("#smartTripStyle").value = smartPlan?.style || "balanced";
-    $("#smartTripPace").value = smartPlan?.pace || "balanced";
-    if (Array.isArray(smartPlan?.interests)) {
-      $$('input[name="smartInterest"]').forEach(input => {
-        input.checked = smartPlan.interests.includes(input.value);
-      });
-    }
-
     friends = Array.isArray(trip.friends)
       ? trip.friends.map(friend => {
           if (typeof friend === "string") {
@@ -1532,7 +1500,8 @@
 
           return {
             name: String(friend.name || ""),
-            going: friend.going !== false
+            going: friend.going !== false,
+            ...(friend.userId ? { userId: friend.userId } : {})
           };
         }).filter(friend => friend.name)
       : [];
@@ -1543,7 +1512,6 @@
 
     renderFriends();
     updateSummary();
-    renderSmartTripPlan(smartPlan);
     if (currentPage === "planner") scrollToPlanner();
   }
 
@@ -1569,24 +1537,498 @@
       const people = 1 + friendList.filter(friend =>
         typeof friend === "string" || friend.going !== false
       ).length;
+      const expenses = getTripExpenses(trip);
+      const actualSpend = expenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount) || 0), 0);
+      const budgetPercent = Number(trip.budget) > 0
+        ? Math.min(100, actualSpend / Number(trip.budget) * 100)
+        : 0;
 
       return `
         <article class="saved-trip-card">
-          <div class="section-kicker">TRIP PLAN</div>
+          <div class="section-kicker">${isSharedTrip(trip.id) ? "ทริปที่เข้าร่วม · ช่วยแก้ไขได้" : "TRIP PLAN"}</div>
           <h3>${escapeHTML(trip.destination || "ทริปใหม่")}</h3>
           <p>${escapeHTML(formatDate(trip.startDate))} – ${escapeHTML(formatDate(trip.endDate))}</p>
           <p>${days ? `${days} วัน` : "ยังไม่ระบุระยะเวลา"} · ${people} คน</p>
           <p>การเดินทาง: ${escapeHTML(trip.transportType || "ไม่ระบุ")}</p>
           <div class="trip-total">${money(total)}</div>
           <p>งบประมาณ ${money(trip.budget || 0)}</p>
-          ${trip.smartPlan ? `<p class="saved-smart-badge">${isPremiumDemo ? `✦ วางแผนด้วย Smart Budget · เงินสำรอง ${money(trip.smartPlan.reserve || 0)}` : "🔒 มีแผน Smart Budget Premium"}</p>` : ""}
+          <div class="saved-expense-summary">
+            <div><span>ใช้จริงแล้ว</span><strong>${moneyExact(actualSpend)}</strong></div>
+            <span>${expenses.length ? `${expenses.length} รายการ` : "ยังไม่มีรายการ"}</span>
+            <div class="saved-expense-meter${actualSpend > Number(trip.budget || 0) ? " over" : ""}" aria-hidden="true"><span style="width:${budgetPercent}%"></span></div>
+          </div>
           <div class="saved-trip-actions">
+            <button type="button" class="saved-expense-button" data-expense-trip="${escapeHTML(trip.id)}">จัดการค่าใช้จ่ายจริง ↗</button>
             <button type="button" data-edit-trip="${escapeHTML(trip.id)}">แก้ไขทริป</button>
-            <button type="button" data-delete-trip="${escapeHTML(trip.id)}">ลบทริป</button>
+            ${cloudConfigured ? `<button type="button" data-share-trip="${escapeHTML(trip.id)}">${isSharedTrip(trip.id) ? "สมาชิกในทริป" : "ชวนเพื่อน / ดูผู้ตอบรับ"}</button>` : ""}
+            ${isSharedTrip(trip.id) ? "" : `<button type="button" data-delete-trip="${escapeHTML(trip.id)}">ลบทริป</button>`}
           </div>
         </article>
       `;
     }).join("");
+  }
+
+  function expenseParticipantNames(trip) {
+    const names = [tripAccess.get(String(trip.id))?.ownerName || trip.ownerDisplayName || getDisplayName() || "ฉัน"];
+    const friendsInTrip = Array.isArray(trip.friends) ? trip.friends : [];
+    friendsInTrip.forEach(friend => {
+      if (friend && typeof friend === "object" && friend.going === false) return;
+      const name = typeof friend === "string" ? friend : friend?.name;
+      if (String(name || "").trim()) names.push(String(name).trim());
+    });
+
+    const seen = new Set();
+    return names.filter(name => {
+      const key = name.normalize("NFC").toLocaleLowerCase("th-TH");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function getTripExpenses(trip) {
+    return Array.isArray(trip?.expenses)
+      ? trip.expenses.filter(expense => expense && typeof expense === "object" && Number(expense.amount) > 0)
+      : [];
+  }
+
+  function getExpenseBalances(trip, participants) {
+    const members = new Map();
+    const addMember = name => {
+      const label = String(name || "").trim();
+      if (!label) return null;
+      const key = label.normalize("NFC").toLocaleLowerCase("th-TH");
+      if (!members.has(key)) members.set(key, { key, name: label, paid: 0, share: 0 });
+      return members.get(key);
+    };
+    participants.forEach(addMember);
+
+    getTripExpenses(trip).forEach(expense => {
+      const totalCents = Math.round(Number(expense.amount) * 100);
+      const payer = addMember(expense.paidBy || participants[0] || "ฉัน");
+      if (!payer || totalCents <= 0) return;
+      payer.paid += totalCents;
+
+      const requestedSplit = Array.isArray(expense.splitBetween) && expense.splitBetween.length
+        ? expense.splitBetween
+        : participants;
+      const split = [...new Set(requestedSplit.map(addMember).filter(Boolean))];
+      if (!split.length) return;
+
+      const baseShare = Math.floor(totalCents / split.length);
+      const extraCents = totalCents % split.length;
+      split.forEach((member, index) => {
+        member.share += baseShare + (index < extraCents ? 1 : 0);
+      });
+    });
+
+    return [...members.values()];
+  }
+
+  function getExpenseSettlement(trip, participants) {
+    const debtors = [];
+    const creditors = [];
+    getExpenseBalances(trip, participants).forEach(member => {
+      const balance = member.paid - member.share;
+      if (balance < 0) debtors.push({ ...member, balance: -balance });
+      if (balance > 0) creditors.push({ ...member, balance });
+    });
+
+    const transfers = [];
+    let debtorIndex = 0;
+    let creditorIndex = 0;
+    while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
+      const debtor = debtors[debtorIndex];
+      const creditor = creditors[creditorIndex];
+      const cents = Math.min(debtor.balance, creditor.balance);
+      if (cents > 0) transfers.push({ from: debtor.name, to: creditor.name, cents });
+      debtor.balance -= cents;
+      creditor.balance -= cents;
+      if (!debtor.balance) debtorIndex += 1;
+      if (!creditor.balance) creditorIndex += 1;
+    }
+    return transfers;
+  }
+
+  function expenseFormParticipants(trip, expense) {
+    return [...new Set([
+      ...expenseParticipantNames(trip),
+      ...(expense?.paidBy ? [expense.paidBy] : []),
+      ...(Array.isArray(expense?.splitBetween) ? expense.splitBetween : [])
+    ].map(name => String(name || "").trim()).filter(Boolean))];
+  }
+
+  function setExpenseFeedback(message, isError = false) {
+    const status = $("#expenseSaveStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("is-error", isError);
+    status.hidden = !message;
+  }
+
+  function setExpenseBusy(busy) {
+    expenseSaving = busy;
+    const dialog = $("#expenseDialog");
+    dialog.setAttribute("aria-busy", String(busy));
+    $$("input, select, button", dialog).forEach(control => {
+      if (busy) {
+        control.dataset.walletWasDisabled = String(control.disabled);
+        control.disabled = true;
+      } else if ("walletWasDisabled" in control.dataset) {
+        control.disabled = control.dataset.walletWasDisabled === "true";
+        delete control.dataset.walletWasDisabled;
+      }
+    });
+  }
+
+  function renderExpenseDeleteConfirmation() {
+    const container = $("#expenseDeleteConfirmation");
+    if (!container) return;
+    const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+    const expense = getTripExpenses(trip).find(item => String(item.id) === String(pendingExpenseDeleteId));
+    container.innerHTML = expense
+      ? `<div class="expense-delete-confirm" role="alert"><span>ลบ “${escapeHTML(expense.title)}” จำนวน ${moneyExact(expense.amount)} ใช่ไหม?</span><div><button type="button" data-cancel-expense-delete>ยกเลิก</button><button type="button" class="confirm" data-confirm-expense-delete>ลบรายการ</button></div></div>`
+      : "";
+  }
+
+  function renderExpenseDialog() {
+    clearExpenseReceiptPreview();
+    const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+    if (!trip) {
+      closeDialog($("#expenseDialog"));
+      return;
+    }
+
+    const content = $("#expenseContent");
+    const expenses = getTripExpenses(trip);
+    const participants = expenseParticipantNames(trip);
+    const editingExpense = editingExpenseId
+      ? expenses.find(expense => String(expense.id) === String(editingExpenseId))
+      : null;
+    const savedSplit = Array.isArray(editingExpense?.splitBetween) && editingExpense.splitBetween.length
+      ? editingExpense.splitBetween
+      : participants;
+    const splitSelection = new Set(savedSplit);
+    const formParticipants = expenseFormParticipants(trip, editingExpense);
+    const existingReceipt = editingExpense && !removeEditingExpenseReceipt
+      ? safeExpenseReceiptDataUrl(editingExpense.receiptImage)
+      : "";
+    const peopleCount = Math.max(1, participants.length);
+    const budget = Math.max(0, Number(trip.budget) || 0);
+    const spent = expenses.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+    const remaining = budget - spent;
+    const percentage = budget > 0 ? Math.min(100, Math.round(spent / budget * 100)) : 0;
+    const isOverBudget = spent > budget;
+    const categorySpent = Object.fromEntries(EXPENSE_CATEGORIES.map(category => [category.id, 0]));
+    expenses.forEach(expense => {
+      const categoryId = categorySpent[expense.category] !== undefined ? expense.category : "activity";
+      categorySpent[categoryId] += Number(expense.amount) || 0;
+    });
+    const categoryBudget = {
+      transport: Number(trip.transport) || 0,
+      food: Number(trip.food) || 0,
+      stay: Number(trip.stay) || 0,
+      activity: Number(trip.other) || 0
+    };
+    const settlement = getExpenseSettlement(trip, participants);
+    const today = new Date();
+    const localToday = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
+      .toISOString().slice(0, 10);
+    const categories = EXPENSE_CATEGORIES.map(category => {
+      const actual = categorySpent[category.id];
+      const planned = categoryBudget[category.id];
+      const barWidth = planned > 0 ? Math.min(100, actual / planned * 100) : (actual > 0 ? 100 : 0);
+      const over = planned > 0 && actual > planned;
+      return `
+        <div class="expense-category-row">
+          <div class="expense-category-label"><span>${category.icon} ${category.label}</span><strong>${moneyExact(actual)} <small>/ ${moneyExact(planned)}</small></strong></div>
+          <div class="expense-category-meter${over ? " over" : ""}" aria-hidden="true"><span style="width:${barWidth}%"></span></div>
+        </div>`;
+    }).join("");
+    const expenseRows = [...expenses]
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .map(expense => {
+        const category = EXPENSE_CATEGORIES.find(item => item.id === expense.category) || EXPENSE_CATEGORIES[3];
+        const splitCount = Array.isArray(expense.splitBetween) && expense.splitBetween.length
+          ? expense.splitBetween.length
+          : peopleCount;
+        const splitNames = Array.isArray(expense.splitBetween) && expense.splitBetween.length
+          ? expense.splitBetween
+          : participants;
+        const receiptImage = safeExpenseReceiptDataUrl(expense.receiptImage);
+        return `
+          <article class="expense-entry">
+            <span class="expense-entry-icon" aria-hidden="true">${category.icon}</span>
+            <div class="expense-entry-info">
+              <strong>${escapeHTML(expense.title || category.label)}</strong>
+              <small title="${escapeHTML(splitNames.join(", "))}">${escapeHTML(category.label)} · ${escapeHTML(formatDate(expense.date))} · ${escapeHTML(expense.paidBy || participants[0] || "ฉัน")} จ่าย · หาร ${splitCount} คน</small>
+              ${receiptImage ? `<button class="expense-receipt-link" type="button" data-view-expense-receipt="${escapeHTML(expense.id)}">🧾 ดูสลิป</button>` : ""}
+            </div>
+            <strong class="expense-entry-amount">${moneyExact(expense.amount)}</strong>
+            ${canEditTripExpense(trip, expense) ? `<div class="expense-entry-actions"><button class="expense-edit-button" type="button" data-edit-expense="${escapeHTML(expense.id)}" aria-label="แก้ไขรายการ ${escapeHTML(expense.title || category.label)}">✎</button><button class="expense-delete-button" type="button" data-delete-expense="${escapeHTML(expense.id)}" aria-label="ลบรายการ ${escapeHTML(expense.title || category.label)}">×</button></div>` : ""}
+          </article>`;
+      }).join("");
+    const settlementTotalCents = settlement.reduce((total, item) => total + item.cents, 0);
+    const transferRows = settlement.map((item, index) => `<li class="wallet-transfer-step">${settlement.length > 1 ? `<span class="wallet-transfer-number" aria-hidden="true">${index + 1}</span>` : ""}<p><b>${escapeHTML(item.from)}</b> <span>โอนให้</span> <b>${escapeHTML(item.to)}</b></p><strong class="wallet-transfer-amount">${moneyExact(item.cents / 100)}</strong></li>`).join("");
+    const settlementMarkup = expenses.length
+      ? `<p class="wallet-settlement-context">รวมค่าใช้จ่ายทั้ง ${expenses.length} รายการ และหักยอดที่จ่ายแทนกันแล้ว</p>${settlement.length
+        ? `<ol class="wallet-transfer-steps">${transferRows}</ol>${settlement.length > 1 ? `<p class="wallet-transfer-total">รวม ${settlement.length} รายการโอน · ${moneyExact(settlementTotalCents / 100)}</p>` : ""}<p class="expense-disclaimer">ถ้าโอนคืนกันไปแล้ว ยอดในหน้านี้ยังไม่ได้หักเงินโอนนั้น</p>`
+        : `<p class="wallet-no-transfer">ทุกคนจ่ายครบส่วนของตัวเองแล้ว ไม่ต้องโอนคืนกัน</p>`}`
+      : `<p class="expense-settlement-empty">เพิ่มค่าใช้จ่ายก่อน แล้วจะเห็นว่าใครต้องโอนให้ใคร</p>`;
+    const memberRows = getExpenseBalances(trip, participants).map(member => {
+      const balance = member.paid - member.share;
+      return `<tr><th scope="row">${escapeHTML(member.name)}</th><td>${moneyExact(member.paid / 100)}</td><td>${moneyExact(member.share / 100)}</td><td class="${balance < 0 ? "wallet-owes" : "wallet-receives"}">${balance === 0 ? "พอดีแล้ว" : `${balance > 0 ? "รับคืน" : "โอนคืน"} ${moneyExact(Math.abs(balance) / 100)}`} </td></tr>`;
+    }).join("");
+    const memberSummary = expenses.length ? `<details class="expense-member-details"><summary>ยอดนี้คิดยังไง?</summary><div class="expense-member-scroll"><table class="expense-member-table"><caption>ยอดจ่ายและส่วนแบ่ง คำนวณจากรายการค่าใช้จ่ายที่บันทึก</caption><thead><tr><th scope="col">สมาชิก</th><th scope="col">จ่ายไป</th><th scope="col">ส่วนของตัวเอง</th><th scope="col">ยอดสุทธิ</th></tr></thead><tbody>${memberRows}</tbody></table></div><p class="expense-disclaimer">แบ่งเศษสตางค์ตามลำดับคนที่เลือก เพื่อให้ยอดรวมตรงกัน · ยอดนี้ยังไม่ได้หักการโอนคืนภายหลัง</p></details>` : "";
+
+    content.innerHTML = `
+      <div class="expense-dialog-heading">
+        <span class="expense-icon-large" aria-hidden="true">฿</span>
+        <div><span class="section-kicker">TRIP WALLET</span><h2 id="expenseDialogTitle">คุมค่าใช้จ่ายจริง</h2><p>${escapeHTML(trip.destination || "ทริปของคุณ")} · ${escapeHTML(formatDate(trip.startDate))} – ${escapeHTML(formatDate(trip.endDate))}</p></div>
+      </div>
+      <section class="expense-overview${isOverBudget ? " over" : ""}" aria-label="สรุปค่าใช้จ่ายจริง">
+        <div class="expense-overview-primary"><span>ใช้ไปแล้ว</span><strong>${moneyExact(spent)}</strong><small>จากงบ ${moneyExact(budget)}</small></div>
+        <div class="expense-budget-meter${isOverBudget ? " over" : ""}" role="progressbar" aria-label="สัดส่วนงบที่ใช้จริง" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}"><span style="width:${percentage}%"></span></div>
+        <div class="expense-overview-stats"><div><span>${isOverBudget ? "เกินงบ" : "งบคงเหลือ"}</span><strong>${moneyExact(Math.abs(remaining))}</strong></div><div><span>เฉลี่ยต่อสมาชิกทั้งหมด · ${peopleCount} คน</span><strong>${moneyExact(spent / peopleCount)}</strong></div></div>
+        ${isOverBudget ? `<p class="expense-budget-alert">⚠️ ใช้เกินงบรวม ${moneyExact(Math.abs(remaining))} ลองดูยอดแต่ละหมวดก่อนวางแผนรายการถัดไป</p>` : ""}
+      </section>
+      <section class="expense-main-grid">
+        <div class="expense-panel expense-add-panel">
+          <div class="expense-panel-heading"><div><span class="section-kicker">TRIP WALLET</span><h3>${editingExpense ? "แก้ไขรายการ" : "เพิ่มรายการ"}</h3></div><span aria-hidden="true">${editingExpense ? "✎" : "＋"}</span></div>
+          <form class="expense-form" id="expenseForm">
+            ${editingExpense ? `<p class="expense-editing-note">กำลังแก้ไข “${escapeHTML(editingExpense.title || "รายการนี้")}” · ยอดหารและสรุปโอนจะคำนวณใหม่เมื่อบันทึก</p>` : ""}
+            <label>จ่ายค่าอะไร<input name="title" type="text" maxlength="80" placeholder="เช่น ค่าอาหารมื้อเย็น" value="${escapeHTML(editingExpense?.title || "")}" required></label>
+            <div class="expense-form-row"><label>หมวดหมู่<select name="category">${EXPENSE_CATEGORIES.map(category => `<option value="${category.id}"${category.id === editingExpense?.category ? " selected" : ""}>${category.icon} ${category.label}</option>`).join("")}</select></label><label>จำนวนเงิน (บาท)<input name="amount" type="number" min="0.01" max="999999999.99" step="0.01" inputmode="decimal" placeholder="0" value="${editingExpense ? escapeHTML(editingExpense.amount) : ""}" required></label></div>
+            <div class="expense-form-row"><label>วันที่<input name="date" type="date" value="${escapeHTML(editingExpense?.date || localToday)}" required></label><label>ใครจ่าย<select name="paidBy">${formParticipants.map(name => `<option value="${escapeHTML(name)}"${(editingExpense?.paidBy || participants[0]) === name ? " selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label></div>
+            <fieldset class="expense-split-field"><legend>หารค่าใช้จ่ายกับใคร <small>เลือกเฉพาะคนที่ร่วมรายการนี้</small></legend><div class="expense-split-members">${formParticipants.map(name => `<label class="expense-split-member"><input type="checkbox" name="splitBetween" value="${escapeHTML(name)}"${splitSelection.has(name) ? " checked" : ""}><span>${escapeHTML(name)}</span></label>`).join("")}</div></fieldset>
+            <div class="expense-receipt-field"><label for="expenseReceipt">แนบสลิป <span>(ไม่บังคับ)</span></label><input id="expenseReceipt" name="receipt" type="file" accept="image/jpeg,image/png,image/webp"><small>${editingExpense ? "เลือกรูปใหม่เพื่อแทนสลิปเดิม · เว้นว่างเพื่อเก็บรูปเดิม" : "JPG, PNG หรือ WEBP · ไม่เกิน 8 MB · ระบบจะย่อรูปก่อนบันทึก"}</small><div class="expense-receipt-preview${existingReceipt ? " expense-existing-receipt" : ""}" id="expenseReceiptPreview"${existingReceipt ? "" : " hidden"}><img id="expenseReceiptPreviewImage" alt="ตัวอย่างรูปสลิป"${existingReceipt ? ` src="${existingReceipt}"` : ""}><span>${existingReceipt ? "สลิปที่แนบไว้" : "แนบรูปสลิปแล้ว"}</span><button type="button" id="removeExpenseReceipt">เอาออก</button></div></div>
+            <p class="expense-form-note" id="expenseFormNote">หารเท่ากันระหว่าง <strong>${splitSelection.size} คน · ${moneyExact((Number(editingExpense?.amount) || 0) / Math.max(1, splitSelection.size))} / คน</strong></p>
+            <p id="expenseSaveStatus" class="expense-save-status" role="status" aria-live="polite" hidden></p>
+            <button class="btn btn-dark full" type="submit">${editingExpense ? "บันทึกการแก้ไข" : "＋ บันทึกค่าใช้จ่าย"}</button>
+            ${editingExpense ? `<button class="btn btn-outline full" type="button" data-cancel-expense-edit>ยกเลิกการแก้ไข</button>` : ""}
+          </form>
+        </div>
+        <div class="expense-panel expense-breakdown-panel">
+          <div class="expense-panel-heading"><div><span class="section-kicker">PLAN VS ACTUAL</span><h3>เทียบกับงบที่วางไว้</h3></div><span aria-hidden="true">◷</span></div>
+          <div class="expense-category-list">${categories}</div>
+          <p class="expense-disclaimer">หมวดกิจกรรมรวมกับค่าใช้จ่ายอื่นตามแผนเดิม</p>
+        </div>
+      </section>
+      <section class="expense-settlement-panel"><div class="expense-panel-heading"><div><span class="section-kicker">SETTLE UP</span><h3>ใครต้องโอนให้ใคร?</h3></div><span aria-hidden="true">⇄</span></div>${settlementMarkup}${memberSummary}${expenses.length ? `<button class="expense-copy-button" type="button" data-copy-expense-summary>คัดลอกสรุปส่งให้เพื่อน ↗</button>` : ""}</section>
+      <section class="expense-ledger-panel"><div class="expense-ledger-heading"><div><span class="section-kicker">TRIP LEDGER</span><h3>รายการทั้งหมด</h3></div><span>${expenses.length} รายการ</span></div><div id="expenseDeleteConfirmation"></div>${expenseRows || `<div class="expense-empty"><span aria-hidden="true">🧾</span><strong>ยังไม่มีค่าใช้จ่ายจริง</strong><p>เริ่มบันทึกรายการแรก เพื่อดูยอดคงเหลือและสรุปหารเงิน</p></div>`}</section>
+    `;
+    updateExpenseSplitNote();
+    renderExpenseDeleteConfirmation();
+  }
+
+  function updateExpenseSplitNote(form = $("#expenseForm")) {
+    if (!form) return;
+    const checked = [...form.querySelectorAll("input[name=\"splitBetween\"]:checked")];
+    const amount = Number(form.querySelector("[name=\"amount\"]")?.value) || 0;
+    const note = form.querySelector("#expenseFormNote");
+    if (!note) return;
+    if (!checked.length) {
+      note.textContent = "เลือกคนอย่างน้อย 1 คนเพื่อแบ่งยอดค่าใช้จ่าย";
+      return;
+    }
+    const cents = Math.max(0, Math.round(amount * 100));
+    const base = Math.floor(cents / checked.length);
+    const extra = cents % checked.length;
+    note.innerHTML = `หาร <strong>${checked.length} คน · ${moneyExact(base / 100)}${extra ? "–" + moneyExact((base + 1) / 100) : ""} / คน</strong>${extra ? " · " + extra + " คนแรกเพิ่มคนละ 0.01 บาท" : ""}`;
+  }
+  async function persistTripUpdate(trip) {
+    const nextTrips = trips.map(item => String(item.id) === String(trip.id) ? trip : item);
+    if (cloudConfigured) {
+      if (!requireCloudAccount()) return false;
+      if (!await writeCloudTrip(trip)) return false;
+    } else if (!saveData(KEYS.trips, nextTrips)) {
+      return false;
+    }
+
+    trips = nextTrips;
+    renderSavedTrips();
+    updateAccountUI();
+    return true;
+  }
+
+  async function addTripExpense(event) {
+    event.preventDefault();
+    if (expenseSaving) return;
+    const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+    if (!trip) return;
+    if (cloudConfigured && !requireCloudAccount()) return;
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    setExpenseFeedback("");
+    const formData = new FormData(form);
+    const title = String(formData.get("title") || "").trim();
+    const amount = Number(formData.get("amount"));
+    const date = String(formData.get("date") || "");
+    const category = String(formData.get("category") || "");
+    const paidBy = String(formData.get("paidBy") || "");
+    const splitBetween = [...new Set(formData.getAll("splitBetween").map(name => String(name)))];
+    const receiptFile = formData.get("receipt");
+    const previousExpense = editingExpenseId
+      ? getTripExpenses(trip).find(expense => String(expense.id) === String(editingExpenseId))
+      : null;
+    if (previousExpense && !canEditTripExpense(trip, previousExpense)) {
+      setExpenseFeedback("แก้ไขได้เฉพาะค่าใช้จ่ายของตัวเอง", true);
+      return;
+    }
+    if (editingExpenseId && !previousExpense) {
+      toast("หารายการที่ต้องการแก้ไขไม่พบ กรุณาเปิด Trip Wallet อีกครั้ง");
+      editingExpenseId = null;
+      renderExpenseDialog();
+      return;
+    }
+    if (!title || !date || !EXPENSE_CATEGORIES.some(item => item.id === category) || !Number.isFinite(amount) || amount <= 0 || amount > 999999999.99 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.0001) {
+      setExpenseFeedback("กรอกชื่อรายการ วันที่ และจำนวนเงินมากกว่า 0 (ทศนิยมไม่เกิน 2 ตำแหน่ง)", true);
+      return;
+    }
+    const participants = expenseFormParticipants(trip, previousExpense);
+    const validNames = new Set(participants);
+    const validSplit = splitBetween.filter(name => validNames.has(name));
+    if (!validSplit.length) {
+      setExpenseFeedback("เลือกคนที่ร่วมรายการอย่างน้อย 1 คน", true);
+      return;
+    }
+    if (!validNames.has(paidBy)) {
+      setExpenseFeedback("เลือกชื่อผู้จ่ายจากสมาชิกในทริป", true);
+      return;
+    }
+    const submitButton = form.querySelector("button[type=\"submit\"]");
+    if (submitButton?.disabled) return;
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "กำลังบันทึก…";
+    }
+    setExpenseBusy(true);
+    setExpenseFeedback("กำลังบันทึกค่าใช้จ่าย…");
+    try {
+      const uploadedReceipt = receiptFile && typeof receiptFile === "object" && receiptFile.size
+        ? await compressExpenseReceipt(receiptFile)
+        : "";
+      const retainedReceipt = !removeEditingExpenseReceipt
+        ? safeExpenseReceiptDataUrl(previousExpense?.receiptImage)
+        : "";
+      const expense = {
+        ...(previousExpense || {}),
+        id: previousExpense?.id || globalThis.crypto?.randomUUID?.() || `expense-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        title, category, amount: Math.round(amount * 100) / 100, date, paidBy, splitBetween: validSplit,
+        ...((uploadedReceipt || retainedReceipt) ? { receiptImage: uploadedReceipt || retainedReceipt } : {}),
+        createdAt: previousExpense?.createdAt || Date.now(),
+        ...(currentUser ? { createdBy: previousExpense?.createdBy || currentUser.id } : {}),
+        updatedAt: Date.now()
+      };
+      if (!uploadedReceipt && !retainedReceipt) delete expense.receiptImage;
+      const currentExpenses = getTripExpenses(trip);
+      const nextExpenses = previousExpense
+        ? currentExpenses.map(item => String(item.id) === String(previousExpense.id) ? expense : item)
+        : [...currentExpenses, expense];
+      const updatedTrip = { ...trip, expenses: nextExpenses, updatedAt: Date.now() };
+      if (!await persistTripUpdate(updatedTrip)) {
+        setExpenseFeedback("บันทึกไม่สำเร็จ ข้อมูลที่กรอกยังอยู่ กรุณาตรวจการเชื่อมต่อแล้วลองอีกครั้ง", true);
+        return;
+      }
+      const wasEditing = Boolean(previousExpense);
+      editingExpenseId = null;
+      removeEditingExpenseReceipt = false;
+      pendingExpenseDeleteId = null;
+      renderExpenseDialog();
+      $("#expenseForm [name=\"title\"]")?.focus();
+      setExpenseFeedback(wasEditing ? "แก้ไขรายการเรียบร้อย ยอดหารอัปเดตแล้ว" : "บันทึกแล้ว เพิ่มรายการถัดไปได้เลย");
+      toast(wasEditing ? "แก้ไขค่าใช้จ่ายแล้ว" : "บันทึกค่าใช้จ่ายแล้ว");
+    } catch (error) {
+      console.error("Tripmate expense save error", error);
+      setExpenseFeedback(error.message || "บันทึกค่าใช้จ่ายไม่สำเร็จ กรุณาลองอีกครั้ง", true);
+    } finally {
+      setExpenseBusy(false);
+      if (submitButton?.isConnected) {
+        submitButton.disabled = false;
+        submitButton.textContent = editingExpenseId ? "บันทึกการแก้ไข" : "＋ บันทึกค่าใช้จ่าย";
+      }
+    }
+  }
+  async function deleteTripExpense(expenseId) {
+    if (expenseSaving) return;
+    const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+    if (!trip || !expenseId) return;
+    if (!canEditTripExpense(trip, getTripExpenses(trip).find(item => String(item.id) === String(expenseId)))) return;
+    if (cloudConfigured && !requireCloudAccount()) return;
+    setExpenseBusy(true);
+    try {
+      const updatedTrip = {
+        ...trip,
+        expenses: getTripExpenses(trip).filter(expense => String(expense.id) !== String(expenseId)),
+        updatedAt: Date.now()
+      };
+      if (!await persistTripUpdate(updatedTrip)) {
+        setExpenseFeedback("ลบไม่สำเร็จ รายการเดิมยังอยู่ กรุณาลองอีกครั้ง", true);
+        return;
+      }
+      if (String(editingExpenseId) === String(expenseId)) {
+        editingExpenseId = null;
+        removeEditingExpenseReceipt = false;
+      }
+      pendingExpenseDeleteId = null;
+      renderExpenseDialog();
+      toast("ลบรายการค่าใช้จ่ายแล้ว");
+    } catch (error) {
+      setExpenseFeedback("ลบรายการไม่สำเร็จ กรุณาลองอีกครั้ง", true);
+    } finally {
+      setExpenseBusy(false);
+    }
+  }
+
+  async function copyExpenseSummary() {
+    const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+    if (!trip) return;
+    const expenses = getTripExpenses(trip);
+    const participants = expenseParticipantNames(trip);
+    const total = expenses.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+    const budget = Math.max(0, Number(trip.budget) || 0);
+    const remaining = budget - total;
+    const settlement = getExpenseSettlement(trip, participants);
+    const settlementTotalCents = settlement.reduce((sum, item) => sum + item.cents, 0);
+    const lines = [
+      `Tripmate · ${trip.destination || "ทริปของฉัน"}`,
+      `รวมค่าใช้จ่าย ${expenses.length} รายการ · ${moneyExact(total)}`,
+      "",
+      "ใครต้องโอนให้ใคร:",
+      ...(settlement.length
+        ? settlement.map((item, index) => `${settlement.length > 1 ? (index + 1) + ". " : ""}${item.from} โอนให้ ${item.to} ${moneyExact(item.cents / 100)}`)
+        : [expenses.length ? "ทุกคนจ่ายครบส่วนของตัวเองแล้ว ไม่ต้องโอนคืนกัน" : "ยังไม่มีค่าใช้จ่าย"]),
+      ...(settlement.length > 1 ? [`รวมยอดโอน ${moneyExact(settlementTotalCents / 100)}`] : []),
+      "",
+      "คำนวณจากค่าใช้จ่ายทุกรายการ ยังไม่ได้หักเงินที่โอนคืนกันไปแล้ว"
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      toast("คัดลอกสรุปค่าใช้จ่ายแล้ว");
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = lines;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      toast(copied ? "คัดลอกสรุปค่าใช้จ่ายแล้ว" : "คัดลอกไม่สำเร็จ กรุณาลองอีกครั้ง");
+    }
+  }
+
+  function openExpenseDialog(tripId) {
+    if (cloudConfigured && !requireCloudAccount()) return;
+    const trip = trips.find(item => String(item.id) === String(tripId));
+    if (!trip) return;
+    activeExpenseTripId = String(tripId);
+    pendingExpenseDeleteId = null;
+    editingExpenseId = null;
+    removeEditingExpenseReceipt = false;
+    renderExpenseDialog();
+    openDialog("#expenseDialog");
   }
 
   async function copySummary() {
@@ -1607,10 +2049,6 @@
       `งบคงเหลือ: ${money(costs.budget - total)}`,
       `เฉลี่ยต่อคน: ${money(total / people)}`
     ].join("\n");
-
-    if (isPremiumDemo && smartPlan) {
-      text += `\nSmart Budget: ${money(smartPlan.plannedSpend)} สำหรับแผนใช้จ่าย · สำรอง ${money(smartPlan.reserve)}`;
-    }
 
     try {
       await navigator.clipboard.writeText(text);
@@ -2046,7 +2484,7 @@
       password: $("#signupPassword").value,
       options: {
         data: { display_name: name, full_name: name },
-        emailRedirectTo: `${window.location.origin}${window.location.pathname}`
+        emailRedirectTo: `${window.location.origin}${window.location.pathname}${window.location.search}`
       }
     });
     if (error) {
@@ -2154,6 +2592,54 @@
 
     $("#startPlanning").addEventListener("click", () => navigateToPage("planner"));
     $("#startPlanningBottom").addEventListener("click", () => navigateToPage("planner"));
+    $("#discoverCategories").addEventListener("click", event => {
+      const button = event.target.closest("[data-discover-query]");
+      if (!button) return;
+      $$("[data-discover-query]", $("#discoverCategories")).forEach(item => {
+        const active = item === button;
+        item.classList.toggle("active", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
+      $("#discoverCategoryLabel").textContent = button.textContent.trim();
+      const province = $("#discoverProvince").value;
+      $("#discoverStatus").textContent = province
+        ? "พร้อมค้นหา" + button.textContent.trim() + "ใน" + province
+        : "เลือกจังหวัดก่อนค้นหาไอเดียเที่ยว";
+    });
+    $("#discoverProvince").addEventListener("change", () => {
+      const province = $("#discoverProvince").value;
+      $("#discoverStatus").textContent = province
+        ? "เลือก " + province + " แล้ว · เลือกหมวดหมู่ที่สนใจเพื่อดูผลค้นหา"
+        : "เลือกจังหวัดและหมวดหมู่ แล้วเปิดผลค้นหาใน Google Maps ได้เลย";
+    });
+    $("#discoverRandomProvince").addEventListener("click", () => {
+      const choices = THAI_PROVINCES.filter(province => province !== $("#discoverProvince").value);
+      const province = choices[Math.floor(Math.random() * choices.length)];
+      $("#discoverProvince").value = province;
+      $("#discoverProvince").dispatchEvent(new Event("change"));
+    });
+    $("#discoverSearch").addEventListener("click", () => {
+      const province = $("#discoverProvince").value;
+      if (!province) {
+        toast("เลือกจังหวัดก่อนค้นหาที่เที่ยว");
+        $("#discoverProvince").focus();
+        return;
+      }
+      const category = $("[data-discover-query].active", $("#discoverCategories"));
+      const query = (category?.dataset.discoverQuery || "สถานที่ท่องเที่ยว") + " " + province + " ประเทศไทย";
+      const url = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(query);
+      window.open(url, "_blank", "noopener,noreferrer");
+      $("#discoverStatus").textContent = "เปิดผลค้นหา " + (category?.textContent.trim() || "ที่เที่ยว") + " ใน" + province + " บน Google Maps แล้ว";
+    });
+    $("#discoverPlanTrip").addEventListener("click", () => {
+      const province = $("#discoverProvince").value;
+      if (!province) {
+        toast("เลือกจังหวัดที่อยากไปก่อนเริ่มวางแผน");
+        $("#discoverProvince").focus();
+        return;
+      }
+      navigateToPage("planner", { new: "1", destination: province });
+    });
 
     $("#goPlanner").addEventListener("click", () => {
       navigateToPage("planner", { new: "1" });
@@ -2208,8 +2694,6 @@
 
       const index = Number(input.dataset.friendGoing);
       if (!friends[index]) return;
-
-      clearSmartTripPlan();
       friends[index].going = input.checked;
       renderFriends();
     });
@@ -2217,22 +2701,18 @@
     $("#friendList").addEventListener("click", event => {
       const button = event.target.closest("[data-remove-friend]");
       if (!button) return;
-
-      clearSmartTripPlan();
       friends.splice(Number(button.dataset.removeFriend), 1);
       renderFriends();
     });
 
     $$("[data-destination]").forEach(button => {
       button.addEventListener("click", () => {
-        clearSmartTripPlan();
         $("#destination").value = button.dataset.destination;
         updateSummary();
       });
     });
 
     $("#suggestDestination").addEventListener("click", () => {
-      clearSmartTripPlan();
       const current = $("#destination").value.trim();
       const choices = THAI_PROVINCES.filter(province => province !== current);
       const choice = choices[Math.floor(Math.random() * choices.length)];
@@ -2247,39 +2727,26 @@
       "#transportType", "#foodType", "#stayType"
     ].forEach(selector => {
       const refreshPlanner = () => {
-        clearSmartTripPlan();
         updateSummary();
       };
       $(selector).addEventListener("input", refreshPlanner);
       $(selector).addEventListener("change", refreshPlanner);
     });
 
-    $("#smartTripStyle").addEventListener("change", clearSmartTripPlan);
-    $("#smartTripPace").addEventListener("change", clearSmartTripPlan);
-    $$('input[name="smartInterest"]').forEach(input => {
-      input.addEventListener("change", event => {
-        const selected = getSelectedSmartInterests();
-        if (event.target.checked && selected.length > 3) {
-          event.target.checked = false;
-          toast("เลือกแนวเที่ยวได้สูงสุด 3 แบบ");
-          return;
-        }
-        clearSmartTripPlan();
-      });
-    });
-    $("#generateSmartTrip").addEventListener("click", generateSmartTrip);
-    $("#smartTripResult").addEventListener("click", event => {
-      if (event.target.closest("[data-open-premium]")) openPremiumDialog();
-      if (event.target.closest("[data-save-smart-trip]")) void saveTrip();
-    });
-    $("#premiumDemoUnlock").addEventListener("click", enablePremiumDemo);
-    $("#disablePremiumDemo").addEventListener("click", disablePremiumDemo);
     $("#saveTrip").addEventListener("click", saveTrip);
     $("#copySummary").addEventListener("click", copySummary);
 
     $("#savedTripGrid").addEventListener("click", async event => {
+      const shareButton = event.target.closest("[data-share-trip]");
+      if (shareButton) { void openTripSharing(shareButton.dataset.shareTrip); return; }
+      const expenseButton = event.target.closest("[data-expense-trip]");
       const editButton = event.target.closest("[data-edit-trip]");
       const deleteButton = event.target.closest("[data-delete-trip]");
+
+      if (expenseButton) {
+        openExpenseDialog(expenseButton.dataset.expenseTrip);
+        return;
+      }
 
       if (editButton) {
         navigateToPage("planner", { trip: editButton.dataset.editTrip });
@@ -2290,7 +2757,7 @@
         const id = deleteButton.dataset.deleteTrip;
         const trip = trips.find(item => item.id === id);
 
-        if (!trip) return;
+        if (!trip || isSharedTrip(trip.id)) return;
 
         if (!confirm(`ต้องการลบทริป "${trip.destination}" หรือไม่?`)) {
           return;
@@ -2319,6 +2786,90 @@
         updateAccountUI();
         toast("ลบทริปแล้ว");
       }
+    });
+
+    const expenseDialog = $("#expenseDialog");
+    expenseDialog.addEventListener("cancel", event => {
+      if (expenseSaving) event.preventDefault();
+    });
+    expenseDialog.addEventListener("submit", event => {
+      if (event.target.id === "expenseForm") void addTripExpense(event);
+    });
+    expenseDialog.addEventListener("input", event => {
+      if (event.target.closest("#expenseForm")) updateExpenseSplitNote(event.target.closest("#expenseForm"));
+    });
+    expenseDialog.addEventListener("change", event => {
+      if (event.target.id === "expenseReceipt") updateExpenseReceiptPreview(event.target);
+      else if (event.target.closest("#expenseForm")) updateExpenseSplitNote(event.target.closest("#expenseForm"));
+    });
+    expenseDialog.addEventListener("click", event => {
+      if (expenseSaving) return;
+      const receiptButton = event.target.closest("[data-view-expense-receipt]");
+      if (receiptButton) {
+        const trip = trips.find(item => String(item.id) === String(activeExpenseTripId));
+        const expense = getTripExpenses(trip).find(item => String(item.id) === String(receiptButton.dataset.viewExpenseReceipt));
+        const receiptImage = safeExpenseReceiptDataUrl(expense?.receiptImage);
+        if (!receiptImage) {
+          toast("ไม่พบรูปสลิปนี้ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง");
+          return;
+        }
+        $("#receiptViewerImage").src = receiptImage;
+        openDialog("#receiptViewerDialog");
+        return;
+      }
+      if (event.target.closest("#removeExpenseReceipt")) {
+        const hadNewFile = Boolean(expenseReceiptPreviewUrl);
+        clearExpenseReceiptPreview();
+        if (editingExpenseId && !hadNewFile) removeEditingExpenseReceipt = true;
+        if (hadNewFile) updateExpenseReceiptPreview($("#expenseReceipt"));
+        return;
+      }
+      const editExpenseButton = event.target.closest("[data-edit-expense]");
+      if (editExpenseButton) {
+        editingExpenseId = editExpenseButton.dataset.editExpense;
+        removeEditingExpenseReceipt = false;
+        pendingExpenseDeleteId = null;
+        renderExpenseDialog();
+        $("#expenseForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        $("#expenseForm [name=\"title\"]")?.focus();
+        return;
+      }
+      if (event.target.closest("[data-cancel-expense-edit]")) {
+        editingExpenseId = null;
+        removeEditingExpenseReceipt = false;
+        renderExpenseDialog();
+        return;
+      }
+      const deleteButton = event.target.closest("[data-delete-expense]");
+      if (deleteButton) {
+        pendingExpenseDeleteId = deleteButton.dataset.deleteExpense;
+        renderExpenseDeleteConfirmation();
+        $("[data-confirm-expense-delete]")?.focus();
+        return;
+      }
+      if (event.target.closest("[data-cancel-expense-delete]")) {
+        const originalButton = $$("[data-delete-expense]").find(button => button.dataset.deleteExpense === pendingExpenseDeleteId);
+        pendingExpenseDeleteId = null;
+        renderExpenseDeleteConfirmation();
+        originalButton?.focus();
+        return;
+      }
+      if (event.target.closest("[data-confirm-expense-delete]")) {
+        void deleteTripExpense(pendingExpenseDeleteId);
+        return;
+      }
+      if (event.target.closest("[data-copy-expense-summary]")) void copyExpenseSummary();
+    });
+    expenseDialog.addEventListener("close", () => {
+      activeExpenseTripId = null;
+      pendingExpenseDeleteId = null;
+      editingExpenseId = null;
+      removeEditingExpenseReceipt = false;
+      clearExpenseReceiptPreview();
+      $("#expenseContent").replaceChildren();
+    });
+    $("#receiptViewerDialog").addEventListener("close", () => {
+      $("#receiptViewerImage").removeAttribute("src");
     });
 
     $("#reviewSearch").addEventListener("input", filterReviews);
@@ -2373,6 +2924,10 @@
     const requestedTrip = params.get("trip");
     if (requestedTrip && trips.some(trip => trip.id === requestedTrip)) {
       loadTrip(requestedTrip);
+    } else if (params.get("destination")) {
+      setDestinationValue(params.get("destination"));
+      updateSummary();
+      renderFriends();
     } else if (params.get("new") !== "1" && trips.length) {
       const latest = [...trips].sort(
         (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
@@ -2385,9 +2940,6 @@
   }
 
   function loadInitialData() {
-    isPremiumDemo = readData(KEYS.premiumDemo, false) === true;
-    updatePremiumUI();
-
     const storedTrips = readData(KEYS.trips, []);
     trips = cloudConfigured ? [] : (Array.isArray(storedTrips) ? storedTrips : []);
 
@@ -2436,9 +2988,12 @@
   // ---------- Start application ----------
 
   populateDestinationOptions();
+  populateDiscoverProvinceOptions();
   initTheme();
   initEvents();
+  initTripSharingEvents();
   updateGoogleMapsKeyLabels();
   loadInitialData();
   void initializeCloudAuth();
+  if (currentPage === "join" && !cloudConfigured) void loadTripInvitation();
 })();
