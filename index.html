@@ -66,22 +66,59 @@
   </section>
 
   <section class="discover-section" id="discover">
-    <div class="wrap">
-      <div class="section-kicker">TRAVEL IDEAS ACROSS THAILAND</div>
-      <div class="discover-heading">
-        <div><h2>ยังไม่รู้จะไปไหน?</h2><p>เลือกจังหวัดแล้วค้นพบที่เที่ยว ร้านอาหาร และกิจกรรมจาก Google Maps</p></div>
-        <span class="discover-count"><strong>77</strong> จังหวัดทั่วไทย</span>
-      </div>
-      <div class="discover-panel">
-        <div class="discover-controls">
-          <label for="discoverProvince">จังหวัดที่อยากไป
-            <select id="discoverProvince" aria-label="เลือกจังหวัดเพื่อค้นหาไอเดียเที่ยว">
-              <option value="" selected disabled>เลือกจังหวัด</option>
-            </select>
-          </label>
-          <button class="btn btn-outline" id="discoverRandomProvince" type="button">สุ่มจังหวัด ↻</button>
+    <div class="discover-country-hero">
+      <div class="wrap discover-country-hero-inner">
+        <div class="discover-country-copy">
+          <span class="section-kicker">EXPLORE THAILAND</span>
+          <h1>เที่ยวไทย<br><em>ครบ 77 จังหวัด</em></h1>
+          <p>รวมจุดหมายทั่วประเทศไทยไว้ให้เลือกในหน้าเดียว ค้นหาจังหวัดที่อยากไป แล้วต่อยอดเป็นแผนทริปได้ทันที</p>
+          <div class="discover-hero-actions"><a class="btn btn-dark" href="#allProvinces">เลือกจังหวัด</a><button class="btn btn-outline" id="discoverRandomProvince" type="button">สุ่มจังหวัดให้ฉัน ↻</button></div>
+          <div class="discover-country-stats"><span><b>77</b> จังหวัด</span><span><b>6</b> ภูมิภาค</span><span><b>1</b> จุดเริ่มทริปใหม่</span></div>
         </div>
-        <div class="discover-category-heading"><strong>เลือกไอเดียที่สนใจ</strong><span id="discoverCategoryLabel">สถานที่ท่องเที่ยว</span></div>
+        <div class="discover-country-art" aria-hidden="true">
+          <span class="country-sun"></span><div class="country-shape">TH</div>
+          <span class="country-pin pin-north">⌖</span><span class="country-pin pin-center">⌖</span><span class="country-pin pin-south">⌖</span>
+          <div class="country-card"><span>✦</span><div><b>เลือกจังหวัด</b><small>แล้วออกเดินทางกัน</small></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap discover-content">
+      <section class="discover-featured" aria-labelledby="featuredTitle">
+        <div class="discover-section-title"><div><span class="section-kicker">DON'T KNOW WHERE TO GO?</span><h2 id="featuredTitle">จุดหมายแนะนำสำหรับทริปต่อไป</h2></div><p>เลือกการ์ดเพื่อดูไอเดียของจังหวัดนั้น</p></div>
+        <div class="discover-featured-grid">
+          <button class="discover-featured-card featured-large" type="button" data-discover-province="เชียงใหม่"><img src="https://images.unsplash.com/photo-1519904981063-b0cf448d479e?auto=format&fit=crop&w=1000&q=80" alt="ธรรมชาติและภูเขาเชียงใหม่" loading="lazy"><span class="featured-overlay"><small>ภาคเหนือ</small><strong>เชียงใหม่</strong><em>ภูเขา วัฒนธรรม และคาเฟ่</em></span></button>
+          <button class="discover-featured-card" type="button" data-discover-province="ภูเก็ต"><img src="https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=800&q=80" alt="ทะเลภูเก็ต" loading="lazy"><span class="featured-overlay"><small>ภาคใต้</small><strong>ภูเก็ต</strong><em>ทะเล อาหาร และเมืองเก่า</em></span></button>
+          <button class="discover-featured-card" type="button" data-discover-province="กาญจนบุรี"><img src="https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=800&q=80" alt="ป่าและน้ำตกกาญจนบุรี" loading="lazy"><span class="featured-overlay"><small>ภาคตะวันตก</small><strong>กาญจนบุรี</strong><em>น้ำตก ป่าเขา และประวัติศาสตร์</em></span></button>
+          <button class="discover-featured-card featured-wide" type="button" data-discover-province="กรุงเทพมหานคร"><img src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1000&q=80" alt="บรรยากาศท่องเที่ยวกรุงเทพมหานคร" loading="lazy"><span class="featured-overlay"><small>ภาคกลาง</small><strong>กรุงเทพมหานคร</strong><em>วัด ตลาด และสีสันเมืองใหญ่</em></span></button>
+        </div>
+      </section>
+
+      <section class="discover-province-explorer" id="allProvinces" aria-labelledby="provinceDirectoryTitle">
+        <div class="discover-section-title"><div><span class="section-kicker">ALL 77 PROVINCES</span><h2 id="provinceDirectoryTitle">เที่ยวทั่วไทย เลือกได้ทุกจังหวัด</h2></div><span class="discover-count"><strong id="discoverProvinceCount">77</strong> จังหวัด</span></div>
+        <div class="discover-directory-toolbar">
+          <label class="discover-search"><span aria-hidden="true">⌕</span><input id="discoverProvinceSearch" type="search" placeholder="ค้นหาชื่อจังหวัด เช่น เชียงใหม่ กระบี่ ชลบุรี" autocomplete="off"></label>
+          <div class="discover-region-tabs" id="discoverRegionTabs" role="group" aria-label="กรองจังหวัดตามภูมิภาค">
+            <button class="active" type="button" data-discover-region="all" aria-pressed="true">ทั้งหมด</button>
+            <button type="button" data-discover-region="north" aria-pressed="false">เหนือ</button>
+            <button type="button" data-discover-region="northeast" aria-pressed="false">อีสาน</button>
+            <button type="button" data-discover-region="central" aria-pressed="false">กลาง</button>
+            <button type="button" data-discover-region="east" aria-pressed="false">ตะวันออก</button>
+            <button type="button" data-discover-region="west" aria-pressed="false">ตะวันตก</button>
+            <button type="button" data-discover-region="south" aria-pressed="false">ใต้</button>
+          </div>
+        </div>
+        <div class="discover-province-regions" id="discoverProvinceRegions"></div>
+      </section>
+
+      <section class="discover-panel discover-choice-panel" id="discoverChoicePanel" aria-labelledby="discoverChoiceTitle">
+        <div class="discover-controls">
+          <label for="discoverProvince"><span id="discoverChoiceTitle">จังหวัดที่เลือก</span>
+            <select id="discoverProvince" aria-label="เลือกจังหวัดเพื่อค้นหาไอเดียเที่ยว"><option value="" selected disabled>เลือกจังหวัด</option></select>
+          </label>
+          <span class="discover-choice-hint">เลือกจังหวัดจากรายชื่อด้านบนหรือเลือกจากเมนูนี้</span>
+        </div>
+        <div class="discover-category-heading"><strong>อยากค้นหาอะไรในจังหวัดนี้?</strong><span id="discoverCategoryLabel">สถานที่ท่องเที่ยว</span></div>
         <div class="discover-categories" id="discoverCategories" role="group" aria-label="ประเภทสถานที่ที่ต้องการค้นหา">
           <button type="button" class="discover-category active" data-discover-query="สถานที่ท่องเที่ยว" aria-pressed="true"><span>📍</span>ที่เที่ยว</button>
           <button type="button" class="discover-category" data-discover-query="ธรรมชาติ น้ำตก จุดชมวิว" aria-pressed="false"><span>🌿</span>ธรรมชาติ</button>
@@ -90,11 +127,8 @@
           <button type="button" class="discover-category" data-discover-query="คาเฟ่" aria-pressed="false"><span>☕</span>คาเฟ่</button>
           <button type="button" class="discover-category" data-discover-query="ตลาดท้องถิ่น ถนนคนเดิน" aria-pressed="false"><span>🛍️</span>ตลาด</button>
         </div>
-        <div class="discover-footer">
-          <p id="discoverStatus" role="status" aria-live="polite">เลือกจังหวัดและหมวดหมู่ แล้วเปิดผลค้นหาใน Google Maps ได้เลย</p>
-          <div><button class="btn btn-outline" id="discoverPlanTrip" type="button">วางแผนจังหวัดนี้</button><button class="btn btn-dark" id="discoverSearch" type="button">ค้นหาที่เที่ยว ↗</button></div>
-        </div>
-      </div>
+        <div class="discover-footer"><p id="discoverStatus" role="status" aria-live="polite">เลือกจังหวัดและหมวดหมู่ แล้วเปิดผลค้นหาใน Google Maps ได้เลย</p><div><button class="btn btn-outline" id="discoverPlanTrip" type="button">วางแผนจังหวัดนี้</button><button class="btn btn-dark" id="discoverSearch" type="button">ค้นหาที่เที่ยว ↗</button></div></div>
+      </section>
       <div class="discover-links"><a href="?page=nearby">ค้นหาที่เที่ยวใกล้ตำแหน่งของฉัน ↗</a><a href="?page=reviews">อ่านรีวิวจากนักเดินทาง ↗</a></div>
     </div>
   </section>

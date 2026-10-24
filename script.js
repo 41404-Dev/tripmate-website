@@ -73,6 +73,14 @@
     "สุพรรณบุรี", "สุราษฎร์ธานี", "สุรินทร์", "หนองคาย", "หนองบัวลำภู",
     "อ่างทอง", "อำนาจเจริญ", "อุดรธานี", "อุตรดิตถ์", "อุทัยธานี", "อุบลราชธานี"
   ];
+  const THAI_REGIONS = [
+    { id: "north", name: "ภาคเหนือ", icon: "⛰️", provinces: ["กำแพงเพชร","เชียงราย","เชียงใหม่","ตาก","นครสวรรค์","น่าน","พะเยา","พิจิตร","พิษณุโลก","เพชรบูรณ์","แพร่","แม่ฮ่องสอน","ลำปาง","ลำพูน","สุโขทัย","อุตรดิตถ์","อุทัยธานี"] },
+    { id: "northeast", name: "ภาคตะวันออกเฉียงเหนือ", icon: "🌾", provinces: ["กาฬสินธุ์","ขอนแก่น","ชัยภูมิ","นครพนม","นครราชสีมา","บึงกาฬ","บุรีรัมย์","มหาสารคาม","มุกดาหาร","ยโสธร","ร้อยเอ็ด","เลย","ศรีสะเกษ","สกลนคร","สุรินทร์","หนองคาย","หนองบัวลำภู","อำนาจเจริญ","อุดรธานี","อุบลราชธานี"] },
+    { id: "central", name: "ภาคกลาง", icon: "🏙️", provinces: ["กรุงเทพมหานคร","ชัยนาท","นครนายก","นครปฐม","นนทบุรี","ปทุมธานี","พระนครศรีอยุธยา","ลพบุรี","สมุทรปราการ","สมุทรสงคราม","สมุทรสาคร","สระบุรี","สิงห์บุรี","สุพรรณบุรี","อ่างทอง"] },
+    { id: "east", name: "ภาคตะวันออก", icon: "🌊", provinces: ["จันทบุรี","ฉะเชิงเทรา","ชลบุรี","ตราด","ปราจีนบุรี","ระยอง","สระแก้ว"] },
+    { id: "west", name: "ภาคตะวันตก", icon: "🌿", provinces: ["กาญจนบุรี","ประจวบคีรีขันธ์","เพชรบุรี","ราชบุรี"] },
+    { id: "south", name: "ภาคใต้", icon: "🏝️", provinces: ["กระบี่","ชุมพร","ตรัง","นครศรีธรรมราช","นราธิวาส","ปัตตานี","พังงา","พัทลุง","ภูเก็ต","ยะลา","ระนอง","สงขลา","สตูล","สุราษฎร์ธานี"] }
+  ];
   const EXPENSE_CATEGORIES = [
     { id: "transport", label: "เดินทาง", icon: "🚆" },
     { id: "food", label: "อาหาร", icon: "🍜" },
@@ -104,6 +112,7 @@
   let nearbyTrackingActive = false;
   let nearbyLastMapUpdate = 0;
   let nearbyLastMappedLocation = null;
+  let activeDiscoverRegion = "all";
   let activeExpenseTripId = null;
   let pendingExpenseDeleteId = null;
   let editingExpenseId = null;
@@ -1162,6 +1171,34 @@
       option.textContent = province;
       select.append(option);
     });
+  }
+
+  function selectDiscoverProvince(province, scrollToChoice = true) {
+    const select = $("#discoverProvince");
+    if (!province || ![...select.options].some(option => option.value === province)) return;
+    select.value = province;
+    select.dispatchEvent(new Event("change"));
+    if (scrollToChoice) $("#discoverChoicePanel").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function renderProvinceDirectory() {
+    const container = $("#discoverProvinceRegions");
+    if (!container) return;
+    const search = String($("#discoverProvinceSearch")?.value || "").trim().toLocaleLowerCase("th-TH");
+    const selected = $("#discoverProvince")?.value || "";
+    let visibleCount = 0;
+    const visibleRegions = THAI_REGIONS.map(region => {
+      if (activeDiscoverRegion !== "all" && region.id !== activeDiscoverRegion) return "";
+      const provinces = region.provinces.filter(province => province.toLocaleLowerCase("th-TH").includes(search));
+      if (!provinces.length) return "";
+      visibleCount += provinces.length;
+      return `<section class="province-region" data-region="${region.id}">
+        <div class="province-region-heading"><span class="province-region-icon" aria-hidden="true">${region.icon}</span><div><h3>${region.name}</h3><small>${provinces.length} จังหวัด</small></div></div>
+        <div class="province-grid">${provinces.map(province => `<button type="button" class="province-button${province === selected ? " active" : ""}" data-discover-province="${escapeHTML(province)}">${escapeHTML(province)}</button>`).join("")}</div>
+      </section>`;
+    }).filter(Boolean);
+    container.innerHTML = visibleRegions.join("") || '<div class="no-results">ไม่พบจังหวัดที่ค้นหา ลองพิมพ์ชื่อใหม่อีกครั้ง</div>';
+    $("#discoverProvinceCount").textContent = String(visibleCount);
   }
 
   function setDestinationValue(destination) {
@@ -2600,6 +2637,22 @@
 
     $("#startPlanning").addEventListener("click", () => navigateToPage("planner"));
     $("#startPlanningBottom").addEventListener("click", () => navigateToPage("planner"));
+    $("#discover").addEventListener("click", event => {
+      const provinceButton = event.target.closest("[data-discover-province]");
+      if (provinceButton) selectDiscoverProvince(provinceButton.dataset.discoverProvince);
+    });
+    $("#discoverProvinceSearch").addEventListener("input", renderProvinceDirectory);
+    $("#discoverRegionTabs").addEventListener("click", event => {
+      const button = event.target.closest("[data-discover-region]");
+      if (!button) return;
+      activeDiscoverRegion = button.dataset.discoverRegion || "all";
+      $$("[data-discover-region]", $("#discoverRegionTabs")).forEach(item => {
+        const active = item === button;
+        item.classList.toggle("active", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
+      renderProvinceDirectory();
+    });
     $("#discoverCategories").addEventListener("click", event => {
       const button = event.target.closest("[data-discover-query]");
       if (!button) return;
@@ -2619,12 +2672,12 @@
       $("#discoverStatus").textContent = province
         ? "เลือก " + province + " แล้ว · เลือกหมวดหมู่ที่สนใจเพื่อดูผลค้นหา"
         : "เลือกจังหวัดและหมวดหมู่ แล้วเปิดผลค้นหาใน Google Maps ได้เลย";
+      renderProvinceDirectory();
     });
     $("#discoverRandomProvince").addEventListener("click", () => {
       const choices = THAI_PROVINCES.filter(province => province !== $("#discoverProvince").value);
       const province = choices[Math.floor(Math.random() * choices.length)];
-      $("#discoverProvince").value = province;
-      $("#discoverProvince").dispatchEvent(new Event("change"));
+      selectDiscoverProvince(province);
     });
     $("#discoverSearch").addEventListener("click", () => {
       const province = $("#discoverProvince").value;
@@ -2997,6 +3050,7 @@
 
   populateDestinationOptions();
   populateDiscoverProvinceOptions();
+  renderProvinceDirectory();
   initTheme();
   initEvents();
   initTripSharingEvents();
