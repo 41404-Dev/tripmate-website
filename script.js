@@ -99,7 +99,7 @@
   let migrationPromptedUserId = null;
   let cloudReviewsLoaded = false;
   let nearbyLocation = null;
-  let selectedNearbyQuery = "สถานที่ท่องเที่ยว";
+  let selectedNearbyQuery = "tourist attractions";
   let nearbyWatchId = null;
   let nearbyTrackingActive = false;
   let nearbyLastMapUpdate = 0;
@@ -859,10 +859,10 @@
   // ---------- Google Maps nearby search ----------
 
   const NEARBY_CATEGORIES = [
-    { name: "สถานที่ท่องเที่ยว", description: "แหล่งท่องเที่ยวและสถานที่น่าสนใจ", icon: "📍", query: "สถานที่ท่องเที่ยว" },
-    { name: "วัดและสถานที่ประวัติศาสตร์", description: "วัด โบราณสถาน และแหล่งเรียนรู้", icon: "🛕", query: "วัดและสถานที่ประวัติศาสตร์" },
-    { name: "ธรรมชาติและจุดชมวิว", description: "สวน น้ำตก ชายหาด และจุดชมวิว", icon: "🌿", query: "ธรรมชาติ น้ำตก ชายหาด จุดชมวิว" },
-    { name: "พิพิธภัณฑ์และหอศิลป์", description: "พิพิธภัณฑ์ แกลเลอรี และนิทรรศการ", icon: "🏛️", query: "พิพิธภัณฑ์และหอศิลป์" }
+    { name: "สถานที่ท่องเที่ยว", description: "แหล่งท่องเที่ยวและสถานที่น่าสนใจ", icon: "📍", query: "tourist attractions" },
+    { name: "วัดและสถานที่ประวัติศาสตร์", description: "วัด โบราณสถาน และแหล่งเรียนรู้", icon: "🛕", query: "temples and historical landmarks" },
+    { name: "ธรรมชาติและจุดชมวิว", description: "สวน น้ำตก ชายหาด และจุดชมวิว", icon: "🌿", query: "parks natural attractions and viewpoints" },
+    { name: "ร้านอาหาร & คาเฟ่", description: "ร้านอาหาร คาเฟ่ และของกินใกล้คุณ", icon: "🍽️", query: "restaurants and cafes" }
   ];
 
   function getGoogleMapsApiKey() {
@@ -961,11 +961,15 @@
   }
 
   function buildGoogleMapsEmbedUrl(query, location) {
+    const latitude = Number(location.latitude).toFixed(6);
+    const longitude = Number(location.longitude).toFixed(6);
     const params = new URLSearchParams({
       key: getGoogleMapsApiKey(),
-      q: query,
-      center: `${location.latitude},${location.longitude}`,
-      zoom: "13"
+      q: `${query} near ${latitude},${longitude}`,
+      center: `${latitude},${longitude}`,
+      zoom: "14",
+      language: "th",
+      region: "TH"
     });
     return `https://www.google.com/maps/embed/v1/search?${params.toString()}`;
   }
