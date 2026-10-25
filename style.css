@@ -925,7 +925,15 @@ body.dark .desktop-nav a.active {
 .saved-trip-card .trip-total {
   font-size: 22px;
   font-weight: 700;
-  margin: 15px 0;
+  margin: 2px 0 8px;
+}
+
+.saved-trip-card .trip-total-label {
+  margin-top: 15px;
+  color: #858b7d;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
 }
 
 .saved-trip-actions {

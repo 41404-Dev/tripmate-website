@@ -1592,6 +1592,7 @@
           <p>${escapeHTML(formatDate(trip.startDate))} – ${escapeHTML(formatDate(trip.endDate))}</p>
           <p>${days ? `${days} วัน` : "ยังไม่ระบุระยะเวลา"} · ${people} คน</p>
           <p>การเดินทาง: ${escapeHTML(trip.transportType || "ไม่ระบุ")}</p>
+          <div class="trip-total-label">งบประมาณ</div>
           <div class="trip-total">${money(trip.budget || 0)}</div>
           <p>ค่าเฉลี่ยต่อคน ${money(total / people)}</p>
           <div class="saved-expense-summary">
