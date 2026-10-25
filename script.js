@@ -1601,7 +1601,7 @@
             <div class="saved-expense-meter${actualSpend > Number(trip.budget || 0) ? " over" : ""}" aria-hidden="true"><span style="width:${budgetPercent}%"></span></div>
           </div>
           <div class="saved-trip-actions">
-            <button type="button" class="saved-expense-button" data-expense-trip="${escapeHTML(trip.id)}">จัดการค่าใช้จ่ายจริง ↗</button>
+            <button type="button" class="saved-expense-button" data-expense-trip="${escapeHTML(trip.id)}">จัดการค่าใช้จ่าย ↗</button>
             <button type="button" data-edit-trip="${escapeHTML(trip.id)}">แก้ไขทริป</button>
             ${cloudConfigured ? `<button type="button" data-share-trip="${escapeHTML(trip.id)}">${isSharedTrip(trip.id) ? "สมาชิกในทริป" : "ชวนเพื่อน / ดูผู้ตอบรับ"}</button>` : ""}
             ${isSharedTrip(trip.id) ? "" : `<button type="button" data-delete-trip="${escapeHTML(trip.id)}">ลบทริป</button>`}
