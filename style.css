@@ -2183,9 +2183,9 @@ body.dark .discover-search,body.dark .province-region,body.dark .discover-choice
 @media(max-width:680px){.discover-country-hero-inner{grid-template-columns:1fr;padding-top:42px;padding-bottom:35px}.discover-country-copy h1{font-size:52px;letter-spacing:-2.5px}.discover-country-copy>p{font-size:12px}.discover-country-art{min-height:320px}.country-card{right:0}.discover-content{padding-top:50px}.discover-featured,.discover-province-explorer{margin-bottom:52px}.discover-section-title{align-items:flex-start;flex-direction:column}.discover-featured-grid{display:grid;grid-template-columns:1fr;grid-template-rows:280px repeat(3,190px)}.discover-featured-card.featured-large,.discover-featured-card.featured-wide{grid-column:auto;grid-row:auto}.province-region{padding:18px 14px}.province-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.discover-choice-panel .discover-controls{align-items:stretch}.discover-choice-hint{padding:0 2px}.discover-country-stats{gap:16px}}
 
 /* Main Tripmate logo */
-.brand.brand-full-logo{display:flex;width:76px;height:70px;align-items:center;justify-content:center;overflow:visible}
-.brand.brand-full-logo img{display:block;width:70px;height:70px;max-width:none;object-fit:contain;border-radius:10px}
-footer .brand.brand-full-logo{width:64px;height:58px}footer .brand.brand-full-logo img{width:58px;height:58px}
-@media(max-width:680px){.brand.brand-full-logo{width:62px;height:58px}.brand.brand-full-logo img{width:58px;height:58px}}
+.brand.brand-full-logo{display:flex;width:auto;height:70px;align-items:center;justify-content:flex-start;gap:7px;overflow:visible}
+.brand.brand-full-logo img{display:block;width:58px;height:58px;max-width:none;object-fit:contain;border-radius:10px}
+footer .brand.brand-full-logo{width:auto;height:58px}footer .brand.brand-full-logo img{width:50px;height:50px}
+@media(max-width:680px){.brand.brand-full-logo{width:auto;height:58px;gap:5px}.brand.brand-full-logo img{width:50px;height:50px}}
 
 @media(max-width:420px){.province-grid{grid-template-columns:1fr}.discover-hero-actions .btn{width:100%}.discover-country-stats{display:grid;grid-template-columns:1fr 1fr}.discover-region-tabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.discover-region-tabs button{flex:0 0 auto}}
