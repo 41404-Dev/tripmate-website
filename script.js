@@ -2948,7 +2948,16 @@
     $("#nearbyResultList").addEventListener("click", event => {
       const button = event.target.closest("[data-nearby-query]");
       if (!button || !nearbyLocation) return;
-      showGoogleNearbyMap(button.dataset.nearbyQuery, nearbyLocation);
+      const query = button.dataset.nearbyQuery;
+      showGoogleNearbyMap(query, nearbyLocation);
+
+      const mapsLink = document.createElement("a");
+      mapsLink.href = buildGoogleMapsUrl(query, nearbyLocation);
+      mapsLink.target = "_blank";
+      mapsLink.rel = "noopener noreferrer";
+      document.body.appendChild(mapsLink);
+      mapsLink.click();
+      mapsLink.remove();
     });
     $("#nearbySearch").addEventListener("click", handleNearbySearch);
 
