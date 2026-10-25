@@ -2188,4 +2188,19 @@ body.dark .discover-search,body.dark .province-region,body.dark .discover-choice
 footer .brand.brand-full-logo{width:auto;height:58px}footer .brand.brand-full-logo img{width:50px;height:50px}
 @media(max-width:680px){.brand.brand-full-logo{width:auto;height:58px;gap:5px}.brand.brand-full-logo img{width:50px;height:50px}}
 
+/* Simplified province discovery hero */
+.discover-country-hero{background:#e6edda;color:var(--ink);border-bottom-color:#d6dec8}
+.discover-country-hero-inner{min-height:430px;display:block;padding-top:70px;padding-bottom:70px}
+.discover-country-copy{max-width:790px}
+.discover-country-copy .section-kicker{color:#68745e}
+.discover-country-copy h1 em{color:#718d2b}
+.discover-country-copy>p{color:#626b5c}
+.discover-country-hero .btn-dark{background:var(--ink)}
+.discover-country-hero .btn-outline{border-color:#bec9ae;background:rgba(255,255,255,.45)}
+.discover-country-stats{color:#68745e}.discover-country-stats b{color:var(--ink)}
+.discover-content{padding-top:58px}.discover-province-explorer{margin-bottom:74px}
+body.dark .discover-country-hero{background:#293326;color:var(--ink);border-bottom-color:var(--line)}
+body.dark .discover-country-copy>p,body.dark .discover-country-copy .section-kicker,body.dark .discover-country-stats{color:var(--muted)}body.dark .discover-country-copy h1 em,body.dark .discover-country-stats b{color:var(--green)}
+@media(max-width:680px){.discover-country-hero-inner{padding-top:48px;padding-bottom:48px}.discover-content{padding-top:42px}}
+
 @media(max-width:420px){.province-grid{grid-template-columns:1fr}.discover-hero-actions .btn{width:100%}.discover-country-stats{display:grid;grid-template-columns:1fr 1fr}.discover-region-tabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.discover-region-tabs button{flex:0 0 auto}}
